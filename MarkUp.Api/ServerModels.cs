@@ -52,3 +52,20 @@ public static class Ids
 {
     public static string New() => Guid.NewGuid().ToString("N");
 }
+
+
+/// <summary>Personal details of a user, one row per user in the "Profiles" tab. Id = the user's Id.</summary>
+public class UserProfileRecord : IEntity
+{
+    public string Id { get; set; } = "";
+    public string Email { get; set; } = "";
+    public DateOnly? DateOfBirth { get; set; }
+    public string Sex { get; set; } = "";
+    public string MaritalStatus { get; set; } = "";
+    public string Address { get; set; } = "";
+    public string EmergencyPhone { get; set; } = "";
+    public DateTime UpdatedAt { get; set; }
+
+    /// <summary>Kept as the last column so the tab stays readable.</summary>
+    public string Photo { get; set; } = "";
+}

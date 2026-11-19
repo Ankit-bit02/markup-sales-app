@@ -52,6 +52,10 @@ public sealed class Browser
     public ValueTask DownloadAsync(string fileName, string contentType, byte[] data) =>
         _js.InvokeVoidAsync("markup.download", fileName, contentType, data);
 
+    /// <summary>Shrinks a picture in the browser to a small square JPEG data URL (null if it cannot be read).</summary>
+    public ValueTask<string?> ResizeImageAsync(byte[] data, string contentType, int maxSize, int maxChars) =>
+        _js.InvokeAsync<string?>("markup.resizeImage", data, contentType, maxSize, maxChars);
+
     public ValueTask<bool> ConfirmAsync(string message) => _js.InvokeAsync<bool>("markup.confirm", message);
 
     public ValueTask RegisterOnlineAsync<T>(DotNetObjectReference<T> target) where T : class =>

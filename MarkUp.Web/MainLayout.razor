@@ -5,6 +5,7 @@
 @inject OfflineSync Sync
 @inject Browser Browser
 @inject ConfirmService Confirm
+@inject ApiClient Api
 
 @if (Auth.IsLoggedIn && !Auth.MustChangePassword)
 {
@@ -49,15 +50,18 @@
                 }
 
                 <div class="nav-section">Account</div>
+                <NavLink class="nav-item" href="profile"><Icon Name="user" /><span>My Profile</span></NavLink>
                 <NavLink class="nav-item" href="change-password"><Icon Name="key" /><span>Change Password</span></NavLink>
             </nav>
 
             <div class="sidebar-user">
-                <span class="avatar">@Initials</span>
-                <div class="who">
-                    <b>@Auth.Name</b>
-                    <small>@RoleLabel</small>
-                </div>
+                <a class="sidebar-user-link" href="profile" title="My Profile">
+                    <Avatar Photo="@Auth.Photo" Name="@Auth.Name" />
+                    <div class="who">
+                        <b>@Auth.Name</b>
+                        <small>@RoleLabel</small>
+                    </div>
+                </a>
                 <button class="btn btn-ghost btn-icon" title="Log out" aria-label="Log out" @onclick="LogoutAsync"><Icon Name="logout" /></button>
             </div>
         </aside>
@@ -74,12 +78,12 @@
                     <span class="badge badge-warning">Offline</span>
                 }
                 <span class="badge badge-role-@Auth.Role no-dot">@RoleLabel</span>
-                <div class="topbar-user">
+                <a class="topbar-user" href="profile" title="My Profile">
                     <div class="who">
                         <b>@Auth.Name</b>
                     </div>
-                    <span class="avatar light">@Initials</span>
-                </div>
+                    <Avatar Photo="@Auth.Photo" Name="@Auth.Name" Class="light" />
+                </a>
             </header>
 
             @if (!online)
@@ -108,6 +112,7 @@ else
 
 @code {
     private bool online = true;
+    private string photoUserId = "";
     private bool menuOpen;
     private DotNetObjectReference<MainLayout>? selfRef;
     private Timer? timer;
@@ -119,17 +124,6 @@ else
         Roles.Admin => "Administrator",
         _ => Auth.Role
     };
-
-    private string Initials
-    {
-        get
-        {
-            var parts = (Auth.Name ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 0) return "?";
-            var first = char.ToUpperInvariant(parts[0][0]);
-            return parts.Length > 1 ? $"{first}{char.ToUpperInvariant(parts[^1][0])}" : first.ToString();
-        }
-    }
 
     protected override void OnInitialized()
     {
@@ -148,6 +142,23 @@ else
         // Try to send waiting records every minute.
         timer = new Timer(_ => InvokeAsync(TickAsync), null, TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(60));
         StateHasChanged();
+        await LoadPhotoAsync();
+    }
+
+    /// <summary>Loads the signed-in user's profile picture once per sign-in (shown in the menu).</summary>
+    private async Task LoadPhotoAsync()
+    {
+        if (!Auth.IsLoggedIn || Auth.MustChangePassword || photoUserId == Auth.UserId) return;
+        photoUserId = Auth.UserId;
+        try
+        {
+            var profile = await Api.GetAsync<ProfileView>("api/profile/me");
+            Auth.SetPhoto(profile.Photo);
+        }
+        catch (Exception)
+        {
+            photoUserId = ""; // e.g. offline: try again on the next change
+        }
     }
 
     private async Task TickAsync()
@@ -201,7 +212,12 @@ else
         Nav.NavigateTo("login", replace: true);
     }
 
-    private void OnAuthChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnAuthChanged() => _ = InvokeAsync(async () =>
+    {
+        if (!Auth.IsLoggedIn) photoUserId = "";
+        StateHasChanged();
+        await LoadPhotoAsync();
+    });
 
     public void Dispose()
     {

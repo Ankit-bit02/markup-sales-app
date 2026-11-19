@@ -1,0 +1,297 @@
+﻿@page "/profile"
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject Browser Browser
+@inject ToastService Toast
+
+<PageTitle>My Profile - MARK_UP</PageTitle>
+
+<RoleGuard>
+    <PageHeader Title="My Profile" Subtitle="Your personal and contact details. Only you can change them." IconName="user" />
+
+    <Alert Kind="error" Title="Could not load your profile" Message="@loadError" />
+
+    @if (profile == null && loadError == null)
+    {
+        <div class="card"><div class="loading"><span class="spinner"></span> Loading your profile...</div></div>
+    }
+    else if (profile != null)
+    {
+        <div class="profile-layout">
+            @* ---------------- Summary + photo ---------------- *@
+            <div class="card profile-summary">
+                <Avatar Photo="@form.Photo" Name="@profile.Name" Class="xl" />
+                <h2>@profile.Name</h2>
+                <div class="row" style="justify-content:center;gap:6px">
+                    <span class="badge badge-role-@profile.Role no-dot">@RoleLabel</span>
+                    <span class="muted small">@profile.Username</span>
+                </div>
+
+                <div class="photo-actions">
+                    <label class='btn btn-sm file-pick @(photoBusy ? "disabled" : "")'>
+                        @if (photoBusy)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="camera" Class="sm" />
+                        }
+                        <span>@(string.IsNullOrEmpty(form.Photo) ? "Add photo" : "Change photo")</span>
+                        <InputFile OnChange="OnPhotoSelectedAsync" accept="image/jpeg,image/png,image/webp,image/*" disabled="@photoBusy" />
+                    </label>
+                    @if (!string.IsNullOrEmpty(form.Photo))
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-danger" @onclick="RemovePhoto"><Icon Name="trash" Class="sm" /> Remove</button>
+                    }
+                </div>
+                <p class="muted small mb-0">JPG, PNG or WebP. It is resized automatically.</p>
+
+                <Alert Kind="error" Class="compact mt-1" Message="@photoError" />
+                @if (photoChanged)
+                {
+                    <Alert Kind="info" Class="compact mt-1">Photo changed. Click <b>Save profile</b> to keep it.</Alert>
+                }
+
+                <div class="detail-list mt-1" style="text-align:left">
+                    @if (!string.IsNullOrEmpty(profile.DealerName))
+                    {
+                        <div class="detail-row">
+                            <Icon Name="building" Class="sm" />
+                            <div><span class="d-label">Dealer</span><span class="d-value">@profile.DealerName</span></div>
+                        </div>
+                    }
+                    <div class="detail-row">
+                        <Icon Name="clock" Class="sm" />
+                        <div>
+                            <span class="d-label">Last updated</span>
+                            <span class='d-value @(string.IsNullOrEmpty(profile.UpdatedAt) ? "empty" : "")'>@(string.IsNullOrEmpty(profile.UpdatedAt) ? "Never" : profile.UpdatedAt)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            @* ---------------- Details form ---------------- *@
+            <div class="card">
+                <EditForm Model="form" OnValidSubmit="SaveAsync">
+                    <DataAnnotationsValidator />
+                    <div class="card-header">
+                        <h3><Icon Name="pencil" /> Personal details</h3>
+                    </div>
+                    <div class="card-body">
+                        <Alert Kind="error" Message="@error" />
+                        <ValidationSummary />
+
+                        <div class="section-title"><Icon Name="phone" Class="sm" /> Contact</div>
+                        <div class="form-grid cols-2">
+                            <label class="field">
+                                <span class="field-label">Contact number</span>
+                                <InputText @bind-Value="form.Phone" inputmode="tel" placeholder="98XXXXXXXX" />
+                                <ValidationMessage For="() => form.Phone" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label">Email</span>
+                                <InputText type="email" @bind-Value="form.Email" autocapitalize="none" placeholder="name@example.com" />
+                                <ValidationMessage For="() => form.Email" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label">Emergency contact number</span>
+                                <InputText @bind-Value="form.EmergencyPhone" inputmode="tel" placeholder="Family member's phone" />
+                                <span class="hint">Who to call in case of an emergency.</span>
+                                <ValidationMessage For="() => form.EmergencyPhone" />
+                            </label>
+                        </div>
+
+                        <div class="section-title mt-2"><Icon Name="user" Class="sm" /> Personal</div>
+                        <div class="form-grid cols-2">
+                            <label class="field">
+                                <span class="field-label">Date of birth</span>
+                                <InputDate @bind-Value="form.DateOfBirth" max="@Fmt.Date(Fmt.Today())" />
+                                <span class="hint">@AgeHint</span>
+                            </label>
+                            <label class="field">
+                                <span class="field-label">Sex</span>
+                                <InputSelect @bind-Value="form.Sex">
+                                    <option value="">Not set</option>
+                                    @foreach (var s in ProfileOptions.Sexes)
+                                    {
+                                        <option value="@s">@s</option>
+                                    }
+                                </InputSelect>
+                            </label>
+                            <label class="field">
+                                <span class="field-label">Marital status</span>
+                                <InputSelect @bind-Value="form.MaritalStatus">
+                                    <option value="">Not set</option>
+                                    @foreach (var m in ProfileOptions.MaritalStatuses)
+                                    {
+                                        <option value="@m">@m</option>
+                                    }
+                                </InputSelect>
+                            </label>
+                            <label class="field full">
+                                <span class="field-label">Address</span>
+                                <InputTextArea @bind-Value="form.Address" rows="2" placeholder="Tole, municipality, district" />
+                                <ValidationMessage For="() => form.Address" />
+                            </label>
+                        </div>
+                    </div>
+                    <div class="card-footer" style="justify-content:flex-end">
+                        <button type="button" class="btn" disabled="@busy" @onclick="Reset">Undo changes</button>
+                        <button type="submit" class="btn btn-primary" disabled="@(busy || photoBusy)">
+                            @if (busy)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            else
+                            {
+                                <Icon Name="check" />
+                            }
+                            <span>Save profile</span>
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    }
+</RoleGuard>
+
+@code {
+    private const long MaxUploadBytes = 10 * 1024 * 1024;
+
+    private ProfileView? profile;
+    private ProfileSaveRequest form = new();
+    private string? loadError;
+    private string? error;
+    private string? photoError;
+    private bool busy;
+    private bool photoBusy;
+    private bool photoChanged;
+
+    private string RoleLabel => profile?.Role switch
+    {
+        Roles.Sales => "Salesperson",
+        Roles.Bill => "Billing",
+        Roles.Admin => "Administrator",
+        _ => profile?.Role ?? ""
+    };
+
+    private string AgeHint
+    {
+        get
+        {
+            if (form.DateOfBirth is not { } dob) return "Your age is calculated from this.";
+            var today = Fmt.Today();
+            var age = today.Year - dob.Year;
+            if (today < dob.AddYears(age)) age--;
+            return age >= 0 ? $"Age: {age} years" : "Date of birth cannot be in the future.";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsLoggedIn || Auth.MustChangePassword) return;
+        try
+        {
+            profile = await Api.GetAsync<ProfileView>("api/profile/me");
+            Fill(profile);
+        }
+        catch (ApiException ex)
+        {
+            loadError = ex.Message;
+        }
+    }
+
+    private void Fill(ProfileView p)
+    {
+        form = new ProfileSaveRequest
+        {
+            Phone = p.Phone,
+            Email = p.Email,
+            DateOfBirth = p.DateOfBirth,
+            Sex = p.Sex,
+            MaritalStatus = p.MaritalStatus,
+            Address = p.Address,
+            EmergencyPhone = p.EmergencyPhone,
+            Photo = p.Photo
+        };
+        photoChanged = false;
+        photoError = null;
+    }
+
+    private void Reset()
+    {
+        if (profile == null) return;
+        Fill(profile);
+        error = null;
+        Toast.Info("Your unsaved changes were undone.");
+    }
+
+    private async Task OnPhotoSelectedAsync(InputFileChangeEventArgs e)
+    {
+        photoError = null;
+        var file = e.File;
+        if (file.ContentType.Length > 0 && !file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            photoError = "Choose a picture file (JPG, PNG or WebP).";
+            return;
+        }
+        if (file.Size > MaxUploadBytes)
+        {
+            photoError = "This picture is larger than 10 MB. Choose a smaller one.";
+            return;
+        }
+
+        photoBusy = true;
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxUploadBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var url = await Browser.ResizeImageAsync(ms.ToArray(), file.ContentType, 256, ProfileOptions.MaxPhotoChars);
+            if (string.IsNullOrEmpty(url))
+            {
+                photoError = "This picture could not be read. Choose a JPG or PNG photo.";
+                return;
+            }
+            form.Photo = url;
+            photoChanged = true;
+        }
+        catch (Exception)
+        {
+            photoError = "This picture could not be read. Choose a JPG or PNG photo.";
+        }
+        finally
+        {
+            photoBusy = false;
+        }
+    }
+
+    private void RemovePhoto()
+    {
+        form.Photo = "";
+        photoChanged = true;
+        photoError = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            profile = await Api.PutAsync<ProfileView>("api/profile/me", form);
+            Fill(profile);
+            Auth.SetPhoto(profile.Photo);
+            Toast.Success("Your profile has been updated.", "Profile saved");
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

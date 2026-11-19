@@ -1,0 +1,28 @@
+﻿@* Profile picture, or the person's initials when there is no picture. *@
+@if (!string.IsNullOrEmpty(Photo))
+{
+    <img class="avatar @Class" src="@Photo" alt="@Name" />
+}
+else
+{
+    <span class="avatar @Class">@Initials</span>
+}
+
+@code {
+    [Parameter] public string Photo { get; set; } = "";
+    [Parameter] public string Name { get; set; } = "";
+
+    /// <summary>Extra CSS classes, e.g. "light", "lg", "xl".</summary>
+    [Parameter] public string Class { get; set; } = "";
+
+    private string Initials
+    {
+        get
+        {
+            var parts = (Name ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return "?";
+            var first = char.ToUpperInvariant(parts[0][0]);
+            return parts.Length > 1 ? $"{first}{char.ToUpperInvariant(parts[^1][0])}" : first.ToString();
+        }
+    }
+}

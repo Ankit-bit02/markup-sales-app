@@ -85,6 +85,16 @@
                                     }
                                 </td>
                                 <td class="actions-cell">
+                                    <button class="btn btn-sm" title="View profile" disabled="@(viewBusyId == u.Id)" @onclick="() => ViewProfileAsync(u)">
+                                        @if (viewBusyId == u.Id)
+                                        {
+                                            <span class="spinner"></span>
+                                        }
+                                        else
+                                        {
+                                            <Icon Name="eye" Class="sm" />
+                                        }
+                                    </button>
                                     <button class="btn btn-sm" @onclick="() => Edit(u)"><Icon Name="pencil" Class="sm" /> Edit</button>
                                     @if (u.IsActive && u.Id != Auth.UserId)
                                     {
@@ -98,6 +108,25 @@
             </div>
         }
     </div>
+
+    @if (viewing != null)
+    {
+        <div class="modal-backdrop" @onclick="CloseView">
+            <div class="modal sm" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+                <div class="modal-header">
+                    <h2>User profile</h2>
+                    <button type="button" class="btn btn-ghost btn-icon" aria-label="Close" @onclick="CloseView"><Icon Name="x" /></button>
+                </div>
+                <div class="modal-body">
+                    <ProfileCard Profile="viewing" />
+                    <Alert Kind="info" Class="compact mt-2">Only the user can change these details, from <b>My Profile</b>.</Alert>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" @onclick="CloseView">Close</button>
+                </div>
+            </div>
+        </div>
+    }
 
     @if (form != null)
     {
@@ -199,6 +228,8 @@
     private string roleFilter = "";
     private string? loadError;
     private string? formError;
+    private ProfileView? viewing;
+    private string? viewBusyId;
 
     private IEnumerable<UserDto> Visible => users
         .Where(u => showInactive || u.IsActive)
@@ -257,6 +288,25 @@
             loaded = true;
         }
     }
+
+    private async Task ViewProfileAsync(UserDto u)
+    {
+        viewBusyId = u.Id;
+        try
+        {
+            viewing = await Api.GetAsync<ProfileView>($"api/profile/{Uri.EscapeDataString(u.Id)}");
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Could not load the profile");
+        }
+        finally
+        {
+            viewBusyId = null;
+        }
+    }
+
+    private void CloseView() => viewing = null;
 
     private void Add()
     {

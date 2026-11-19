@@ -1,0 +1,75 @@
+﻿@* Read-only view of a user's profile (used by Admin on the Users page). *@
+<div class="profile-head">
+    <Avatar Photo="@Profile.Photo" Name="@Profile.Name" Class="lg" />
+    <div>
+        <h3>@Profile.Name</h3>
+        <div class="row" style="gap:6px;margin-top:4px">
+            <span class="badge badge-role-@Profile.Role no-dot">@RoleLabel(Profile.Role)</span>
+            <span class="muted small">@Profile.Username</span>
+        </div>
+    </div>
+</div>
+
+<div class="detail-list">
+    <div class="detail-row">
+        <Icon Name="phone" Class="sm" />
+        <div><span class="d-label">Contact number</span><span class='d-value @Empty(Profile.Phone)'>@Show(Profile.Phone)</span></div>
+    </div>
+    <div class="detail-row">
+        <Icon Name="mail" Class="sm" />
+        <div><span class="d-label">Email</span><span class='d-value @Empty(Profile.Email)'>@Show(Profile.Email)</span></div>
+    </div>
+    <div class="detail-row">
+        <Icon Name="calendar" Class="sm" />
+        <div>
+            <span class="d-label">Date of birth</span>
+            <span class='d-value @(Profile.DateOfBirth == null ? "empty" : "")'>
+                @(Profile.DateOfBirth is { } dob ? $"{Fmt.Date(dob)} ({Profile.Age} yrs)" : "Not set")
+            </span>
+        </div>
+    </div>
+    <div class="detail-row">
+        <Icon Name="user" Class="sm" />
+        <div><span class="d-label">Sex</span><span class='d-value @Empty(Profile.Sex)'>@Show(Profile.Sex)</span></div>
+    </div>
+    <div class="detail-row">
+        <Icon Name="heart" Class="sm" />
+        <div><span class="d-label">Marital status</span><span class='d-value @Empty(Profile.MaritalStatus)'>@Show(Profile.MaritalStatus)</span></div>
+    </div>
+    <div class="detail-row">
+        <Icon Name="home" Class="sm" />
+        <div><span class="d-label">Address</span><span class='d-value @Empty(Profile.Address)'>@Show(Profile.Address)</span></div>
+    </div>
+    <div class="detail-row">
+        <Icon Name="alert" Class="sm" />
+        <div><span class="d-label">Emergency contact</span><span class='d-value @Empty(Profile.EmergencyPhone)'>@Show(Profile.EmergencyPhone)</span></div>
+    </div>
+    @if (!string.IsNullOrEmpty(Profile.DealerName))
+    {
+        <div class="detail-row">
+            <Icon Name="building" Class="sm" />
+            <div><span class="d-label">Dealer</span><span class="d-value">@Profile.DealerName</span></div>
+        </div>
+    }
+</div>
+
+@if (!string.IsNullOrEmpty(Profile.UpdatedAt))
+{
+    <p class="muted small mt-1 mb-0">Last updated @Profile.UpdatedAt</p>
+}
+
+@code {
+    [Parameter, EditorRequired] public ProfileView Profile { get; set; } = new();
+
+    private static string Show(string value) => string.IsNullOrWhiteSpace(value) ? "Not set" : value;
+
+    private static string Empty(string value) => string.IsNullOrWhiteSpace(value) ? "empty" : "";
+
+    private static string RoleLabel(string role) => role switch
+    {
+        Roles.Sales => "Salesperson",
+        Roles.Bill => "Billing",
+        Roles.Admin => "Administrator",
+        _ => role
+    };
+}

@@ -265,3 +265,57 @@ public class ApiError
 {
     public string Message { get; set; } = "";
 }
+
+
+
+// ---------------------------------------------------------------- Profile
+
+public class ProfileView
+{
+    public string UserId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Username { get; set; } = "";
+    public string Role { get; set; } = "";
+    public string DealerName { get; set; } = "";
+    public string Phone { get; set; } = "";
+    public string Email { get; set; } = "";
+    public DateOnly? DateOfBirth { get; set; }
+    public int? Age { get; set; }
+    public string Sex { get; set; } = "";
+    public string MaritalStatus { get; set; } = "";
+    public string Address { get; set; } = "";
+    public string EmergencyPhone { get; set; } = "";
+
+    /// <summary>Profile picture as a data URL (data:image/jpeg;base64,...), or empty.</summary>
+    public string Photo { get; set; } = "";
+    public string UpdatedAt { get; set; } = "";
+}
+
+public class ProfileSaveRequest
+{
+    [StringLength(20)]
+    [RegularExpression(@"^[0-9+\-\s]*$", ErrorMessage = "Contact number can contain digits, spaces, + and - only.")]
+    public string Phone { get; set; } = "";
+
+    [StringLength(100)]
+    [RegularExpression(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", ErrorMessage = "Enter a valid email address.")]
+    public string Email { get; set; } = "";
+
+    public DateOnly? DateOfBirth { get; set; }
+
+    [StringLength(10)]
+    public string Sex { get; set; } = "";
+
+    [StringLength(20)]
+    public string MaritalStatus { get; set; } = "";
+
+    [StringLength(300)]
+    public string Address { get; set; } = "";
+
+    [StringLength(20)]
+    [RegularExpression(@"^[0-9+\-\s]*$", ErrorMessage = "Emergency contact can contain digits, spaces, + and - only.")]
+    public string EmergencyPhone { get; set; } = "";
+
+    [StringLength(ProfileOptions.MaxPhotoChars, ErrorMessage = "The profile picture is too large. Choose a smaller picture.")]
+    public string Photo { get; set; } = "";
+}

@@ -66,3 +66,11 @@ public static class TargetViews
     public const string Monthly = "monthly";
     public const string Overall = "overall";
 }
+
+public static class ProfileOptions
+{
+    public static readonly string[] Sexes = { "Male", "Female", "Other" };
+    public static readonly string[] MaritalStatuses = { "Single", "Married", "Divorced" };
+
+    public const int MaxPhotoChars = 45000;
+}

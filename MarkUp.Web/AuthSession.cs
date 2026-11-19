@@ -21,6 +21,16 @@ public sealed class AuthSession
     public string Token => IsLoggedIn ? Current!.Token : "";
     public bool MustChangePassword => IsLoggedIn && Current!.MustChangePassword;
 
+    /// <summary>Profile picture (data URL) of the signed-in user, shown in the menu. Empty = initials.</summary>
+    public string Photo { get; private set; } = "";
+
+    public void SetPhoto(string? photo)
+    {
+        photo ??= "";
+        if (Photo == photo) return;
+        Photo = photo;
+        Changed?.Invoke();
+    }
     public bool IsInRole(params string[] roles) => IsLoggedIn && roles.Contains(Current!.Role);
 
     public async Task InitializeAsync()
@@ -38,6 +48,7 @@ public sealed class AuthSession
 
     public async Task SetAsync(LoginResponse response)
     {
+        if (Current?.UserId != response.UserId) Photo = "";
         Current = response;
         await _browser.SetJsonAsync(StorageKey, response);
         Changed?.Invoke();
@@ -46,6 +57,7 @@ public sealed class AuthSession
     public async Task ClearAsync()
     {
         Current = null;
+        Photo = "";
         await _browser.RemoveItemAsync(StorageKey);
         Changed?.Invoke();
     }

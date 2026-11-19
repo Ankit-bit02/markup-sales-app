@@ -50,6 +50,40 @@
             a.remove();
             setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
         },
+        resizeImage: async function (bytes, contentType, maxSize, maxChars) {
+            // Center-crops to a square, shrinks to maxSize px and returns a JPEG data URL
+            // no longer than maxChars (or null when the picture cannot be read).
+            try {
+                var blob = new Blob([bytes], { type: contentType || "image/jpeg" });
+                var bmp = await createImageBitmap(blob);
+                var side = Math.min(bmp.width, bmp.height);
+                var sx = (bmp.width - side) / 2;
+                var sy = (bmp.height - side) / 2;
+                var sizes = [Math.min(maxSize, side), 192, 144];
+                for (var i = 0; i < sizes.length; i++) {
+                    var size = sizes[i];
+                    var canvas = document.createElement("canvas");
+                    canvas.width = size;
+                    canvas.height = size;
+                    var ctx = canvas.getContext("2d");
+                    ctx.fillStyle = "#ffffff";
+                    ctx.fillRect(0, 0, size, size);
+                    ctx.imageSmoothingQuality = "high";
+                    ctx.drawImage(bmp, sx, sy, side, side, 0, 0, size, size);
+                    for (var q = 0.85; q >= 0.45; q -= 0.1) {
+                        var url = canvas.toDataURL("image/jpeg", q);
+                        if (url.length <= maxChars) {
+                            if (bmp.close) bmp.close();
+                            return url;
+                        }
+                    }
+                }
+                if (bmp.close) bmp.close();
+                return null;
+            } catch (e) {
+                return null;
+            }
+        },
         confirm: function (message) {
             return window.confirm(message);
         },
