@@ -1,0 +1,35 @@
+@inject AuthSession Auth
+@inject NavigationManager Nav
+
+@if (allowed)
+{
+    @ChildContent
+}
+
+@code {
+    /// <summary>Comma-separated roles allowed to see the content. Empty = any signed-in user.</summary>
+    [Parameter] public string Allow { get; set; } = "";
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool allowed;
+
+    protected override void OnParametersSet()
+    {
+        allowed = false;
+        if (!Auth.IsLoggedIn)
+        {
+            Nav.NavigateTo("login", replace: true);
+            return;
+        }
+        if (Auth.MustChangePassword)
+        {
+            Nav.NavigateTo("change-password", replace: true);
+            return;
+        }
+
+        var roles = Allow.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        allowed = roles.Length == 0 || roles.Contains(Auth.Role);
+        if (!allowed) Nav.NavigateTo(Auth.HomePath, replace: true);
+    }
+}

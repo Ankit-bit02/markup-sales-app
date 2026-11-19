@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/*.user
+**/node_modules/
+MarkUp.Web/
+**/*.json.key
+**/*-sa.json
+**/secrets/
+.git/

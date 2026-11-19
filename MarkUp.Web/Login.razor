@@ -1,0 +1,101 @@
+@page "/login"
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject NavigationManager Nav
+@inject ToastService Toast
+
+<PageTitle>Sign in - MARK_UP</PageTitle>
+
+<div class="auth-wrap">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <img src="icons/icon-192.png" alt="" />
+            <h1>Welcome to MARK_UP</h1>
+            <p>Sign in to continue</p>
+        </div>
+
+        <Alert Kind="error" Message="@error" />
+
+        <EditForm Model="model" OnValidSubmit="LoginAsync">
+            <DataAnnotationsValidator />
+            <div class="stack">
+                <label class="field">
+                    <span class="field-label req">Username</span>
+                    <span class="input-icon">
+                        <Icon Name="user" />
+                        <InputText @bind-Value="model.Username" autocomplete="username" autocapitalize="none" placeholder="Enter your username" />
+                    </span>
+                    <ValidationMessage For="() => model.Username" />
+                </label>
+
+                <label class="field">
+                    <span class="field-label req">Password</span>
+                    <span class="input-icon">
+                        <Icon Name="lock" />
+                        <InputText type='@(showPassword ? "text" : "password")' @bind-Value="model.Password" autocomplete="current-password" placeholder="Enter your password" />
+                        <button type="button" class="input-action" aria-label='@(showPassword ? "Hide password" : "Show password")' @onclick="() => { showPassword = !showPassword; }">
+                            <Icon Name='@(showPassword ? "eye-off" : "eye")' />
+                        </button>
+                    </span>
+                    <ValidationMessage For="() => model.Password" />
+                </label>
+
+                <button type="submit" class="btn btn-primary btn-lg btn-block" disabled="@busy">
+                    @if (busy)
+                    {
+                        <span class="spinner"></span>
+                        <span>Signing in...</span>
+                    }
+                    else
+                    {
+                        <span>Sign in</span>
+                    }
+                </button>
+            </div>
+        </EditForm>
+
+        @if (busy)
+        {
+            <p class="auth-foot">The first sign-in of the day can take up to a minute while the server wakes up.</p>
+        }
+        else
+        {
+            <p class="auth-foot">Forgot your password? Ask your administrator to reset it.</p>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly LoginRequest model = new();
+    private string? error;
+    private bool busy;
+    private bool showPassword;
+
+    protected override void OnInitialized()
+    {
+        if (Auth.IsLoggedIn) Nav.NavigateTo(Auth.MustChangePassword ? "change-password" : Auth.HomePath, replace: true);
+    }
+
+    private async Task LoginAsync()
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            model.Username = model.Username.Trim();
+            var res = await Api.PostAsync<LoginResponse>("api/auth/login", model);
+            await Auth.SetAsync(res);
+            model.Password = "";
+            if (!res.MustChangePassword) Toast.Success($"Signed in as {res.Name}.", "Welcome");
+            Nav.NavigateTo(res.MustChangePassword ? "change-password" : Auth.HomePath, replace: true);
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

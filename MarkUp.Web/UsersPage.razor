@@ -1,0 +1,344 @@
+@page "/admin/users"
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject ToastService Toast
+@inject ConfirmService Confirm
+
+<PageTitle>Users - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Users and Roles" Subtitle="Everyone who signs in. The role decides what each person can see and do." IconName="users" />
+
+    <div class="stats">
+        <div class="stat"><div class="stat-label">Administrators</div><div class="stat-value">@users.Count(u => u.IsActive && u.Role == Roles.Admin)</div></div>
+        <div class="stat"><div class="stat-label">Salespeople</div><div class="stat-value">@users.Count(u => u.IsActive && u.Role == Roles.Sales)</div></div>
+        <div class="stat"><div class="stat-label">Billing staff</div><div class="stat-value">@users.Count(u => u.IsActive && u.Role == Roles.Bill)</div></div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2><Icon Name="users" /> All users</h2>
+            @if (loaded)
+            {
+                <span class="count">@Visible.Count()</span>
+            }
+            <span class="spacer"></span>
+            <button class="btn btn-primary" @onclick="Add"><Icon Name="plus" /> Add user</button>
+        </div>
+        <div class="toolbar">
+            <div class="search input-icon">
+                <Icon Name="search" />
+                <input placeholder="Search name or username..." @bind="search" @bind:event="oninput" />
+            </div>
+            <select style="max-width:180px" @bind="roleFilter">
+                <option value="">All roles</option>
+                <option value="@Roles.Admin">Administrators</option>
+                <option value="@Roles.Sales">Salespeople</option>
+                <option value="@Roles.Bill">Billing staff</option>
+            </select>
+            <label class="check"><input type="checkbox" @bind="showInactive" /> Show inactive</label>
+            <span class="spacer"></span>
+            <button class="btn btn-ghost btn-sm" @onclick="LoadAsync"><Icon Name="refresh" Class="sm" /> Refresh</button>
+        </div>
+
+        <Alert Kind="error" Message="@loadError" Class="mt-2" />
+
+        @if (!loaded && loadError == null)
+        {
+            <div class="loading"><span class="spinner"></span> Loading...</div>
+        }
+        else if (!Visible.Any())
+        {
+            <EmptyState IconName="users" Title="No users found" Text="Try another search or filter, or add a new user." />
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr><th>User</th><th>Role</th><th>Dealer</th><th>Phone</th><th>Status</th><th class="text-right">Actions</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var u in Visible)
+                        {
+                            <tr class='@(u.IsActive ? "" : "inactive")' @key="u.Id">
+                                <td>
+                                    <div class="row" style="flex-wrap:nowrap">
+                                        <span class="avatar light">@Initials(u.Name)</span>
+                                        <div>
+                                            <div class="cell-title">@u.Name @(u.Id == Auth.UserId ? "(you)" : "")</div>
+                                            <div class="cell-sub">@u.Username</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="badge badge-role-@u.Role no-dot">@RoleLabel(u.Role)</span></td>
+                                <td>@DealerName(u.DealerId)</td>
+                                <td class="nowrap">@u.Phone</td>
+                                <td>
+                                    @if (u.IsActive)
+                                    {
+                                        <span class="badge badge-success">Active</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge badge-muted">Inactive</span>
+                                    }
+                                </td>
+                                <td class="actions-cell">
+                                    <button class="btn btn-sm" @onclick="() => Edit(u)"><Icon Name="pencil" Class="sm" /> Edit</button>
+                                    @if (u.IsActive && u.Id != Auth.UserId)
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger" title="Deactivate" @onclick="() => DeactivateAsync(u)"><Icon Name="ban" Class="sm" /></button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    @if (form != null)
+    {
+        <div class="modal-backdrop">
+            <div class="modal" role="dialog" aria-modal="true">
+                <EditForm Model="form" OnValidSubmit="SaveAsync">
+                    <DataAnnotationsValidator />
+                    <div class="modal-header">
+                        <h2>@(editId == null ? "Add user" : "Edit user")</h2>
+                        <button type="button" class="btn btn-ghost btn-icon" aria-label="Close" @onclick="Close"><Icon Name="x" /></button>
+                    </div>
+                    <div class="modal-body">
+                        <Alert Kind="error" Message="@formError" />
+                        <ValidationSummary />
+                        <div class="form-grid cols-2">
+                            <label class="field full">
+                                <span class="field-label req">Full name</span>
+                                <InputText @bind-Value="form.Name" placeholder="e.g. Ram Sharma" />
+                                <ValidationMessage For="() => form.Name" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label req">Username</span>
+                                <InputText @bind-Value="form.Username" autocapitalize="none" placeholder="e.g. ram.sharma" />
+                                <span class="hint">Letters, numbers, dot, dash or underscore. No spaces.</span>
+                                <ValidationMessage For="() => form.Username" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label">Phone</span>
+                                <InputText @bind-Value="form.Phone" inputmode="tel" placeholder="98XXXXXXXX" />
+                                <ValidationMessage For="() => form.Phone" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label req">Role</span>
+                                <InputSelect @bind-Value="form.Role">
+                                    <option value="@Roles.Sales">Salesperson</option>
+                                    <option value="@Roles.Bill">Billing staff</option>
+                                    <option value="@Roles.Admin">Administrator</option>
+                                </InputSelect>
+                                <span class="hint">@RoleHint(form.Role)</span>
+                            </label>
+                            @if (form.Role == Roles.Sales)
+                            {
+                                <label class="field">
+                                    <span class="field-label req">Dealer</span>
+                                    <InputSelect @bind-Value="form.DealerId">
+                                        <option value="">Select dealer</option>
+                                        @foreach (var d in dealers.Where(d => d.IsActive || d.Id == form.DealerId))
+                                        {
+                                            <option value="@d.Id">@d.Name</option>
+                                        }
+                                    </InputSelect>
+                                    <span class="hint">The dealer this salesperson works under.</span>
+                                </label>
+                            }
+                            else
+                            {
+                                <span></span>
+                            }
+                            <label class="field full">
+                                <span class='field-label @(editId == null ? "req" : "")'>@(editId == null ? "Temporary password" : "New password")</span>
+                                <InputText type="password" @bind-Value="form.Password" autocomplete="new-password"
+                                           placeholder='@(editId == null ? "At least 8 characters, a letter and a number" : "Leave empty to keep the current password")' />
+                                <span class="hint">The user must set their own password at first sign-in.</span>
+                                <ValidationMessage For="() => form.Password" />
+                            </label>
+                            <label class="check full"><InputCheckbox @bind-Value="form.IsActive" disabled="@(editId == Auth.UserId)" /> Active (can sign in)</label>
+                        </div>
+                        <p class="muted small mt-2 mb-0">Fields marked <span style="color:var(--danger)">*</span> are required.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn" @onclick="Close" disabled="@busy">Cancel</button>
+                        <button type="submit" class="btn btn-primary" disabled="@busy">
+                            @if (busy)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            else
+                            {
+                                <Icon Name="check" />
+                            }
+                            <span>@(editId == null ? "Add user" : "Save changes")</span>
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    }
+</RoleGuard>
+
+@code {
+    private List<UserDto> users = new();
+    private List<Dealer> dealers = new();
+    private UserSaveRequest? form;
+    private string? editId;
+    private bool busy;
+    private bool loaded;
+    private bool showInactive;
+    private string search = "";
+    private string roleFilter = "";
+    private string? loadError;
+    private string? formError;
+
+    private IEnumerable<UserDto> Visible => users
+        .Where(u => showInactive || u.IsActive)
+        .Where(u => roleFilter.Length == 0 || u.Role == roleFilter)
+        .Where(u => search.Trim().Length == 0
+                    || u.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)
+                    || u.Username.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase))
+        .OrderBy(u => u.Name);
+
+    private string DealerName(string id) => dealers.FirstOrDefault(d => d.Id == id)?.Name ?? "";
+
+    private static string RoleLabel(string role) => role switch
+    {
+        Roles.Sales => "Salesperson",
+        Roles.Bill => "Billing",
+        Roles.Admin => "Administrator",
+        _ => role
+    };
+
+    private static string RoleHint(string role) => role switch
+    {
+        Roles.Sales => "Market visits, orders and own reports.",
+        Roles.Bill => "Bill or cancel orders, see all reports.",
+        Roles.Admin => "Full access, including setup and users.",
+        _ => ""
+    };
+
+    private static string Initials(string name)
+    {
+        var parts = (name ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        var first = char.ToUpperInvariant(parts[0][0]);
+        return parts.Length > 1 ? $"{first}{char.ToUpperInvariant(parts[^1][0])}" : first.ToString();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin)) return;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loadError = null;
+        try
+        {
+            dealers = await Api.GetAsync<List<Dealer>>("api/masters/dealers");
+            users = await Api.GetAsync<List<UserDto>>("api/users");
+        }
+        catch (ApiException ex)
+        {
+            loadError = ex.Message;
+        }
+        finally
+        {
+            loaded = true;
+        }
+    }
+
+    private void Add()
+    {
+        formError = null;
+        editId = null;
+        form = new UserSaveRequest { Role = Roles.Sales, IsActive = true };
+    }
+
+    private void Edit(UserDto u)
+    {
+        formError = null;
+        editId = u.Id;
+        form = new UserSaveRequest
+        {
+            Name = u.Name,
+            Username = u.Username,
+            Phone = u.Phone,
+            Role = u.Role,
+            DealerId = u.DealerId,
+            IsActive = u.IsActive,
+            Password = ""
+        };
+    }
+
+    private void Close()
+    {
+        form = null;
+        formError = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (form == null) return;
+        if (editId == null && string.IsNullOrWhiteSpace(form.Password))
+        {
+            formError = "Set a temporary password for the new user.";
+            return;
+        }
+        if (form.Role == Roles.Sales && string.IsNullOrEmpty(form.DealerId))
+        {
+            formError = "Select the dealer for this salesperson.";
+            return;
+        }
+
+        busy = true;
+        formError = null;
+        try
+        {
+            var isNew = editId == null;
+            if (isNew) await Api.PostAsync<UserDto>("api/users", form);
+            else await Api.PutAsync<UserDto>($"api/users/{Uri.EscapeDataString(editId!)}", form);
+            Toast.Success(isNew
+                ? $"{form.Name} can now sign in as {form.Username}."
+                : $"{form.Name} has been updated.", isNew ? "User added" : "Saved");
+            form = null;
+            await LoadAsync();
+        }
+        catch (ApiException ex)
+        {
+            formError = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task DeactivateAsync(UserDto u)
+    {
+        var ok = await Confirm.AskAsync($"Deactivate {u.Name}?",
+            "They will be signed out immediately and will not be able to sign in. Their past orders stay in reports.",
+            "Deactivate", danger: true);
+        if (!ok) return;
+        try
+        {
+            await Api.DeleteAsync($"api/users/{Uri.EscapeDataString(u.Id)}");
+            Toast.Success($"{u.Name} has been deactivated.");
+            await LoadAsync();
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Could not deactivate");
+        }
+    }
+}

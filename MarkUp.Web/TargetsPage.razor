@@ -1,0 +1,168 @@
+@page "/admin/targets"
+@inject ApiClient Api
+@inject AuthSession Auth
+
+<PageTitle>Targets - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Targets" Subtitle="Monthly sales value and product quantity targets for each salesperson." IconName="target" />
+
+    <Alert Kind="error" Message="@error" />
+    <Alert Kind="info" Title="How targets are split">
+        Daily target = monthly target &divide; working days in the month (from <a href="admin/settings">Master Settings</a>).
+        MTD target = daily target &times; working days up to the report date.
+    </Alert>
+
+    <div class="tabs">
+        <button class='@(tab == "value" ? "active" : "")' @onclick='() => { tab = "value"; }'><Icon Name="target" Class="sm" /> Value targets</button>
+        <button class='@(tab == "product" ? "active" : "")' @onclick='() => { tab = "product"; }'><Icon Name="package" Class="sm" /> Product targets</button>
+    </div>
+
+    @if (tab == "value")
+    {
+        <MasterList TItem="Target" Title="Monthly value targets" ItemName="value target" ItemNamePlural="targets" IconName="target"
+                    ApiPath="api/masters/targets"
+                    SearchText="@(t => UserName(t.UserId))"
+                    Sort="@(l => l.OrderByDescending(t => t.Year * 100 + t.Month).ThenBy(t => UserName(t.UserId)))"
+                    NewItem="@(() => new Target { Year = Fmt.Today().Year, Month = Fmt.Today().Month, IsActive = true })">
+            <HeaderCells>
+                <th>Salesperson</th>
+                <th>Month</th>
+                <th class="num">Target (NPR)</th>
+            </HeaderCells>
+            <RowCells Context="t">
+                <td class="cell-title">@UserName(t.UserId)</td>
+                <td>@MonthName(t.Month) @t.Year</td>
+                <td class="num"><b>@Fmt.Money(t.TargetValue)</b></td>
+            </RowCells>
+            <FormFields Context="t">
+                <label class="field full">
+                    <span class="field-label req">Salesperson</span>
+                    <InputSelect @bind-Value="t.UserId">
+                        <option value="">Select salesperson</option>
+                        @foreach (var u in SalesUsers(t.UserId))
+                        {
+                            <option value="@u.Id">@u.Name</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => t.UserId" />
+                </label>
+                <label class="field">
+                    <span class="field-label req">Year</span>
+                    <InputNumber @bind-Value="t.Year" />
+                    <ValidationMessage For="() => t.Year" />
+                </label>
+                <label class="field">
+                    <span class="field-label req">Month</span>
+                    <InputSelect @bind-Value="t.Month">
+                        @for (var m = 1; m <= 12; m++)
+                        {
+                            <option value="@m">@MonthName(m)</option>
+                        }
+                    </InputSelect>
+                </label>
+                <label class="field full">
+                    <span class="field-label req">Target value (NPR)</span>
+                    <InputNumber @bind-Value="t.TargetValue" step="any" />
+                    <ValidationMessage For="() => t.TargetValue" />
+                </label>
+            </FormFields>
+        </MasterList>
+    }
+    else
+    {
+        <MasterList TItem="ProductTarget" Title="Monthly product quantity targets" ItemName="product target" ItemNamePlural="product targets" IconName="package"
+                    ApiPath="api/masters/product-targets"
+                    SearchText='@(t => UserName(t.UserId) + " " + ProductName(t.ProductId))'
+                    Sort="@(l => l.OrderByDescending(t => t.Year * 100 + t.Month).ThenBy(t => UserName(t.UserId)).ThenBy(t => ProductName(t.ProductId)))"
+                    NewItem="@(() => new ProductTarget { Year = Fmt.Today().Year, Month = Fmt.Today().Month, IsActive = true })">
+            <HeaderCells>
+                <th>Salesperson</th>
+                <th>Month</th>
+                <th>Product</th>
+                <th class="num">Target qty</th>
+            </HeaderCells>
+            <RowCells Context="t">
+                <td class="cell-title">@UserName(t.UserId)</td>
+                <td>@MonthName(t.Month) @t.Year</td>
+                <td>@ProductName(t.ProductId)</td>
+                <td class="num"><b>@Fmt.Qty(t.TargetQty)</b> @ProductUnit(t.ProductId)</td>
+            </RowCells>
+            <FormFields Context="t">
+                <label class="field full">
+                    <span class="field-label req">Salesperson</span>
+                    <InputSelect @bind-Value="t.UserId">
+                        <option value="">Select salesperson</option>
+                        @foreach (var u in SalesUsers(t.UserId))
+                        {
+                            <option value="@u.Id">@u.Name</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => t.UserId" />
+                </label>
+                <label class="field">
+                    <span class="field-label req">Year</span>
+                    <InputNumber @bind-Value="t.Year" />
+                    <ValidationMessage For="() => t.Year" />
+                </label>
+                <label class="field">
+                    <span class="field-label req">Month</span>
+                    <InputSelect @bind-Value="t.Month">
+                        @for (var m = 1; m <= 12; m++)
+                        {
+                            <option value="@m">@MonthName(m)</option>
+                        }
+                    </InputSelect>
+                </label>
+                <label class="field full">
+                    <span class="field-label req">Product</span>
+                    <InputSelect @bind-Value="t.ProductId">
+                        <option value="">Select product</option>
+                        @foreach (var p in products.Where(x => x.IsActive || x.Id == t.ProductId))
+                        {
+                            <option value="@p.Id">@p.Code - @p.Name</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => t.ProductId" />
+                </label>
+                <label class="field full">
+                    <span class="field-label req">Target quantity (base unit)</span>
+                    <InputNumber @bind-Value="t.TargetQty" step="any" />
+                    <span class="hint">In the product's base unit, e.g. Pcs.</span>
+                    <ValidationMessage For="() => t.TargetQty" />
+                </label>
+            </FormFields>
+        </MasterList>
+    }
+</RoleGuard>
+
+@code {
+    private List<UserDto> users = new();
+    private List<Product> products = new();
+    private string? error;
+    private string tab = "value";
+
+    private static readonly string[] Months = CultureInfo.InvariantCulture.DateTimeFormat.MonthNames;
+
+    private static string MonthName(int m) => m is >= 1 and <= 12 ? Months[m - 1] : m.ToString();
+    private string UserName(string id) => users.FirstOrDefault(u => u.Id == id)?.Name ?? "";
+    private string ProductName(string id) => products.FirstOrDefault(p => p.Id == id)?.Name ?? "";
+    private string ProductUnit(string id) => products.FirstOrDefault(p => p.Id == id)?.Unit ?? "";
+
+    private IEnumerable<UserDto> SalesUsers(string currentId) =>
+        users.Where(u => u.Role == Roles.Sales && (u.IsActive || u.Id == currentId)).OrderBy(u => u.Name);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin)) return;
+        try
+        {
+            users = await Api.GetAsync<List<UserDto>>("api/users");
+            products = await Api.GetAsync<List<Product>>("api/masters/products");
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+    }
+}

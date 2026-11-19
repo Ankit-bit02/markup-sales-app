@@ -1,0 +1,656 @@
+@page "/sales"
+@implements IDisposable
+@inject ApiClient Api
+@inject OfflineSync Sync
+@inject Browser Browser
+@inject AuthSession Auth
+@inject ToastService Toast
+@inject ConfirmService Confirm
+
+<PageTitle>Market Visit - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Sales">
+    <PageHeader Title="Market Visit" Subtitle="@SubtitleText" IconName="map-pin">
+        <Actions>
+            <span class="badge badge-info no-dot"><Icon Name="calendar" Class="sm" /> @Fmt.Date(Fmt.Today()), @Fmt.Today().DayOfWeek</span>
+        </Actions>
+    </PageHeader>
+
+    <Alert Kind="error" Title="Could not load your data" Message="@loadError" />
+    @if (offlineData)
+    {
+        <Alert Kind="warning" Title="Working offline">Using beats, parties and products saved on this phone. Visits will be sent when you are back online.</Alert>
+    }
+
+    @* ---------------- Attendance ---------------- *@
+    <div class="card">
+        <div class="status-card">
+            @if (attOk)
+            {
+                <span class="status-icon ok"><Icon Name="check-circle" Class="lg" /></span>
+                <div class="status-text">
+                    <b>Attendance marked</b>
+                    <span>@attStatus</span>
+                </div>
+            }
+            else if (attBusy)
+            {
+                <span class="status-icon info"><span class="spinner"></span></span>
+                <div class="status-text">
+                    <b>Marking attendance...</b>
+                    <span>Getting your location. Please wait.</span>
+                </div>
+            }
+            else
+            {
+                <span class="status-icon wait"><Icon Name="clock" Class="lg" /></span>
+                <div class="status-text">
+                    <b>Attendance not marked</b>
+                    <span>Turn on location (GPS) and tap the button. Visits can be saved after attendance.</span>
+                </div>
+                <button class="btn btn-primary" @onclick="CaptureAttendanceAsync"><Icon Name="map-pin" /> Mark attendance</button>
+            }
+        </div>
+        @if (!string.IsNullOrEmpty(attError))
+        {
+            <div style="padding:0 18px 4px">
+                <Alert Kind="error" Message="@attError" />
+            </div>
+        }
+    </div>
+
+    @* ---------------- Orders ready to share ---------------- *@
+    @foreach (var r in results.Where(r => r.Productive))
+    {
+        <div class="card share-card" @key="r.VisitId">
+            <span class="status-icon ok"><Icon Name="check-circle" Class="lg" /></span>
+            <div class="share-text">
+                <b>Order @r.OrderNo saved</b>
+                <span>@r.PartyName &middot; NPR @Fmt.Money(r.TotalValue)</span>
+            </div>
+            <button class="btn btn-whatsapp" @onclick="() => ShareAsync(r)"><Icon Name="message" /> Share on WhatsApp</button>
+            <button class="btn btn-ghost btn-sm" @onclick="() => DismissAsync(r)">Done</button>
+        </div>
+    }
+
+    @* ---------------- Records waiting to send ---------------- *@
+    @if (queue.Count > 0)
+    {
+        <div class="card">
+            <div class="card-header">
+                <h3><Icon Name="upload" /> Waiting to send</h3>
+                <span class="count">@queue.Count</span>
+                <span class="spacer"></span>
+                <button class="btn btn-sm" disabled="@Sync.IsSyncing" @onclick="SyncNowAsync">
+                    @if (Sync.IsSyncing)
+                    {
+                        <span class="spinner"></span>
+                        <span>Sending...</span>
+                    }
+                    else
+                    {
+                        <Icon Name="send" Class="sm" />
+                        <span>Send now</span>
+                    }
+                </button>
+            </div>
+            <div class="card-body">
+                @if (!string.IsNullOrEmpty(Sync.LastMessage))
+                {
+                    <Alert Kind="warning" Class="compact" Message="@Sync.LastMessage" />
+                }
+                @foreach (var q in queue)
+                {
+                    <div class="queue-item" @key="q.Id">
+                        <span class='status-icon @(string.IsNullOrEmpty(q.Error) ? "wait" : "err")' style="width:32px;height:32px">
+                            <Icon Name='@(string.IsNullOrEmpty(q.Error) ? "clock" : "alert")' Class="sm" />
+                        </span>
+                        <div class="q-text">
+                            <div>@q.Label</div>
+                            <small>Saved @(q.CreatedAt.ToString("yyyy-MM-dd HH:mm"))</small>
+                            @if (!string.IsNullOrEmpty(q.Error))
+                            {
+                                <Alert Kind="error" Class="compact mt-1" Title="Not accepted" Message="@q.Error" />
+                                <div class="actions">
+                                    <button class="btn btn-sm" @onclick="() => RetryAsync(q.Id)"><Icon Name="refresh" Class="sm" /> Try again</button>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveQueuedAsync(q)"><Icon Name="trash" Class="sm" /> Remove</button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    @* ---------------- Visit form ---------------- *@
+    @if (boot != null)
+    {
+        <div class="card">
+            <div class="card-header">
+                <h3><Icon Name="store" /> Visit details</h3>
+            </div>
+            <div class="card-body">
+                @if (boot.Beats.Count == 0)
+                {
+                    <Alert Kind="warning" Title="No beat assigned">Ask your administrator to assign a beat to you.</Alert>
+                }
+                <div class="form-grid cols-2">
+                    <div class="field">
+                        <span class="field-label req">Beat</span>
+                        @if (boot.Beats.Count == 1)
+                        {
+                            <input value="@boot.Beats[0].Name" readonly />
+                        }
+                        else
+                        {
+                            <select @bind="beatId" @bind:after="OnBeatChanged" disabled="@(boot.Beats.Count == 0)">
+                                <option value="">Select today's beat</option>
+                                @foreach (var b in boot.Beats)
+                                {
+                                    <option value="@b.Id">@b.Name</option>
+                                }
+                            </select>
+                        }
+                    </div>
+                    <div class="field">
+                        <span class="field-label req">Party</span>
+                        <select @bind="partyId" disabled="@(string.IsNullOrEmpty(beatId))">
+                            <option value="">@(string.IsNullOrEmpty(beatId) ? "Select a beat first" : "Select party")</option>
+                            @foreach (var p in PartiesInBeat)
+                            {
+                                <option value="@p.Id">@p.Name</option>
+                            }
+                        </select>
+                    </div>
+                    @if (SelectedParty != null)
+                    {
+                        <div class="party-info full">
+                            <Icon Name="map-pin" Class="sm" />
+                            <div>
+                                <b>@SelectedParty.Name</b>
+                                @if (!string.IsNullOrWhiteSpace(SelectedParty.Address))
+                                {
+                                    <div>@SelectedParty.Address</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(SelectedParty.ContactPerson) || !string.IsNullOrWhiteSpace(SelectedParty.Phone))
+                                {
+                                    <div class="muted">@SelectedParty.ContactPerson @SelectedParty.Phone</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3><Icon Name="cart" /> Order</h3>
+                @if (lines.Count > 0)
+                {
+                    <span class="count">@lines.Count item(s)</span>
+                }
+            </div>
+            <div class="card-body">
+                @for (var i = 0; i < lines.Count; i++)
+                {
+                    var line = lines[i];
+                    var product = ProductOf(line);
+                    if (product == null) continue;
+                    var calc = Calc(line, product);
+                    var schemes = SchemesFor(product);
+                    <div class="line-item" @key="line">
+                        <div class="line-item-head">
+                            <div class="name">
+                                <b>@product.Name</b>
+                                <small>@product.Code &middot; RT @Fmt.Money(product.RetailerRate) / @product.Unit</small>
+                            </div>
+                            <button class="btn btn-sm btn-outline-danger" title="Remove" @onclick="() => { lines.Remove(line); }"><Icon Name="trash" Class="sm" /></button>
+                        </div>
+                        <div class="grid-2">
+                            <label class="field">
+                                <span class="field-label req">Quantity</span>
+                                <input type="number" inputmode="decimal" min="0" step="any" @bind="line.Qty" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label req">Unit</span>
+                                <select @bind="line.Unit">
+                                    <option value="@UnitKinds.Unit">@product.Unit</option>
+                                    @if (!string.IsNullOrWhiteSpace(product.SecondUnit))
+                                    {
+                                        <option value="@UnitKinds.Second">@($"{product.SecondUnit} ({Fmt.Qty(product.ConvFactor)} {product.Unit})")</option>
+                                    }
+                                </select>
+                            </label>
+                        </div>
+                        @if (schemes.Count > 0)
+                        {
+                            <label class="field mt-1">
+                                <span class="field-label">Scheme</span>
+                                <select @bind="line.SchemeId">
+                                    <option value="">No scheme</option>
+                                    @foreach (var s in schemes)
+                                    {
+                                        <option value="@s.Id">@SchemeText(s, product)</option>
+                                    }
+                                </select>
+                            </label>
+                        }
+                        <div class="line-calc">
+                            <span>@Fmt.Qty(calc.BaseQty) @product.Unit &times; @Fmt.Money(calc.Rate)</span>
+                            @if (calc.Discount > 0)
+                            {
+                                <span class="disc">&minus; @Fmt.Money(calc.Discount) discount</span>
+                            }
+                            @if (calc.FreeQty > 0)
+                            {
+                                <span class="free">+ @Fmt.Qty(calc.FreeQty) @product.Unit free</span>
+                            }
+                            <span class="amount">NPR @Fmt.Money(calc.LineValue)</span>
+                        </div>
+                        @if (!string.IsNullOrEmpty(line.SchemeId) && !calc.SchemeApplied)
+                        {
+                            <Alert Kind="warning" Class="compact mt-1">This scheme does not apply. Check the minimum quantity, or choose "No scheme".</Alert>
+                        }
+                    </div>
+                }
+
+                <div class="add-product">
+                    <div class="section-title mt-0"><Icon Name="plus" Class="sm" /> Add product</div>
+                    <div class="form-grid cols-2">
+                        <div class="input-icon">
+                            <Icon Name="search" />
+                            <input placeholder="Search name or code" @bind="productFilter" @bind:event="oninput" />
+                        </div>
+                        <select @bind="addProductId" @bind:after="AddSelectedProduct">
+                            <option value="">@AddProductPrompt</option>
+                            @foreach (var p in FilteredProducts)
+                            {
+                                <option value="@p.Id">@p.Code - @p.Name</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+
+                @if (lines.Count == 0)
+                {
+                    <label class="field mt-2">
+                        <span class="field-label req">No order? Reason</span>
+                        <textarea maxlength="200" @bind="reason" placeholder="e.g. Shop closed, enough stock, owner not available"></textarea>
+                        <span class="hint">Required when the party does not order.</span>
+                    </label>
+                }
+                else
+                {
+                    <div class="total-bar">
+                        <span>Order total</span>
+                        <b>NPR @Fmt.Money(OrderTotal)</b>
+                    </div>
+                }
+
+                <Alert Kind="error" Message="@formError" Class="mt-2" />
+
+                <button class="btn btn-primary btn-lg btn-block mt-2" disabled="@(saving || !attOk || boot.Beats.Count == 0)" @onclick="SaveAsync">
+                    @if (saving)
+                    {
+                        <span class="spinner"></span>
+                        <span>Saving...</span>
+                    }
+                    else if (lines.Count > 0)
+                    {
+                        <Icon Name="check" />
+                        <span>Save order</span>
+                    }
+                    else
+                    {
+                        <Icon Name="check" />
+                        <span>Save visit (no order)</span>
+                    }
+                </button>
+                @if (!attOk)
+                {
+                    <p class="muted small mt-1 mb-0" style="text-align:center">Mark attendance first to save visits.</p>
+                }
+            </div>
+        </div>
+    }
+    else if (string.IsNullOrEmpty(loadError))
+    {
+        <div class="card"><div class="loading"><span class="spinner"></span> Loading your beats and products...</div></div>
+    }
+</RoleGuard>
+
+@code {
+    private sealed class LineModel
+    {
+        public string ProductId { get; set; } = "";
+        public decimal Qty { get; set; } = 1;
+        public string Unit { get; set; } = UnitKinds.Unit;
+        public string SchemeId { get; set; } = "";
+    }
+
+    private SalesBootstrap? boot;
+    private string? loadError;
+    private bool offlineData;
+
+    private bool attOk;
+    private bool attBusy;
+    private string attStatus = "";
+    private string? attError;
+
+    private string beatId = "";
+    private string partyId = "";
+    private string reason = "";
+    private string productFilter = "";
+    private string addProductId = "";
+    private readonly List<LineModel> lines = new();
+    private bool saving;
+    private string? formError;
+
+    private List<QueuedRecord> queue = new();
+    private List<VisitResult> results = new();
+
+    private string SubtitleText => boot == null
+        ? "Record each shop visit and order."
+        : string.IsNullOrEmpty(boot.DealerName) ? boot.UserName : $"{boot.UserName} · {boot.DealerName}";
+
+    private string AddProductPrompt
+    {
+        get
+        {
+            var count = FilteredProducts.Count();
+            if (count == 0) return "No matching products";
+            return productFilter.Trim().Length > 0 ? $"Select from {count} match(es)" : "Select a product to add";
+        }
+    }
+
+    private IEnumerable<Party> PartiesInBeat =>
+        boot == null || string.IsNullOrEmpty(beatId) ? Enumerable.Empty<Party>() : boot.Parties.Where(p => p.BeatId == beatId);
+
+    private Party? SelectedParty => boot?.Parties.FirstOrDefault(p => p.Id == partyId);
+
+    private IEnumerable<Product> FilteredProducts
+    {
+        get
+        {
+            if (boot == null) return Enumerable.Empty<Product>();
+            var f = productFilter.Trim();
+            var list = boot.Products.AsEnumerable();
+            if (f.Length > 0)
+                list = list.Where(p => p.Name.Contains(f, StringComparison.OrdinalIgnoreCase) || p.Code.Contains(f, StringComparison.OrdinalIgnoreCase));
+            return list.Take(200);
+        }
+    }
+
+    private static string SchemeText(Scheme s, Product product)
+    {
+        var text = $"{s.Name} ({SchemeTypes.Label(s.Type)}: {Fmt.Qty(s.Value)}";
+        if (s.MinQty > 0) text += $", min {Fmt.Qty(s.MinQty)} {product.Unit}";
+        return text + ")";
+    }
+
+    private Product? ProductOf(LineModel line) => boot?.Products.FirstOrDefault(p => p.Id == line.ProductId);
+
+    private List<Scheme> SchemesFor(Product product)
+    {
+        if (boot == null) return new List<Scheme>();
+        var today = Fmt.Today();
+        return boot.Schemes.Where(s => s.IsActive && s.ProductId == product.Id && s.StartDate <= today && s.EndDate >= today).ToList();
+    }
+
+    private LineCalc Calc(LineModel line, Product product)
+    {
+        var scheme = boot?.Schemes.FirstOrDefault(s => s.Id == line.SchemeId);
+        return Pricing.Calculate(product, line.Qty, line.Unit, scheme, Fmt.Today());
+    }
+
+    private decimal OrderTotal => lines.Sum(l => ProductOf(l) is { } p ? Calc(l, p).LineValue : 0);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsLoggedIn || Auth.Role != Roles.Sales || Auth.MustChangePassword) return;
+        Sync.Changed += OnSyncChanged;
+        await LoadBootAsync();
+        await RefreshQueueAsync();
+        await EnsureAttendanceAsync();
+        _ = SyncNowAsync();
+    }
+
+    private async Task LoadBootAsync()
+    {
+        loadError = null;
+        try
+        {
+            boot = await Api.GetAsync<SalesBootstrap>("api/sales/bootstrap");
+            await Sync.SaveBootstrapAsync(boot);
+            offlineData = false;
+        }
+        catch (ApiException ex) when (ex.IsTransient)
+        {
+            boot = await Sync.GetCachedBootstrapAsync();
+            offlineData = boot != null;
+            if (boot == null)
+                loadError = "No connection and no saved data on this phone. Connect to the internet once to load your beats and products.";
+        }
+        catch (ApiException ex)
+        {
+            loadError = ex.Message;
+        }
+
+        if (boot != null && boot.Beats.Count == 1) beatId = boot.Beats[0].Id;
+    }
+
+    private async Task EnsureAttendanceAsync()
+    {
+        var today = Fmt.Today();
+        if (boot != null && boot.AttendanceMarkedToday && boot.Today == today)
+        {
+            attOk = true;
+            attStatus = $"{boot.AttendanceTime} · {boot.AttendanceLocation}";
+            await Sync.SetLocalAttendanceDateAsync(today);
+            return;
+        }
+        if (await Sync.GetLocalAttendanceDateAsync() == Fmt.Date(today))
+        {
+            attOk = true;
+            attStatus = "Captured on this phone today.";
+            return;
+        }
+        await CaptureAttendanceAsync();
+    }
+
+    private async Task CaptureAttendanceAsync()
+    {
+        attBusy = true;
+        attError = null;
+        StateHasChanged();
+        try
+        {
+            var geo = await Browser.GetLocationAsync();
+            if (!geo.Ok)
+            {
+                attError = geo.Error ?? "Could not get your location.";
+                return;
+            }
+
+            var req = new AttendanceRequest
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                CapturedAt = Fmt.LocalNow(),
+                Lat = geo.Lat,
+                Lng = geo.Lng
+            };
+            await Sync.EnqueueAsync(OfflineSync.KindAttendance, req.Id, req, $"Attendance {req.CapturedAt:yyyy-MM-dd HH:mm}");
+            await Sync.SetLocalAttendanceDateAsync(Fmt.Today());
+            attOk = true;
+            attStatus = $"Marked at {req.CapturedAt:HH:mm}.";
+            Toast.Success($"Attendance marked at {req.CapturedAt:HH:mm}.", "Good morning");
+            _ = SyncNowAsync();
+        }
+        catch (Exception ex)
+        {
+            attError = ex.Message;
+        }
+        finally
+        {
+            attBusy = false;
+        }
+    }
+
+    private void OnBeatChanged()
+    {
+        partyId = "";
+    }
+
+    private void AddSelectedProduct()
+    {
+        if (string.IsNullOrEmpty(addProductId)) return;
+        var product = boot?.Products.FirstOrDefault(p => p.Id == addProductId);
+        if (product != null)
+        {
+            lines.Add(new LineModel { ProductId = product.Id, Qty = 1, Unit = UnitKinds.Unit });
+        }
+        addProductId = "";
+        productFilter = "";
+    }
+
+    private async Task SaveAsync()
+    {
+        formError = null;
+        if (boot == null) return;
+
+        if (string.IsNullOrEmpty(beatId)) { formError = "Select a beat."; return; }
+        if (string.IsNullOrEmpty(partyId)) { formError = "Select a party."; return; }
+
+        foreach (var l in lines)
+        {
+            var p = ProductOf(l);
+            if (p == null) { formError = "A product in the order is no longer available. Remove it."; return; }
+            if (l.Qty <= 0) { formError = $"Enter a quantity for {p.Name}."; return; }
+            if (!string.IsNullOrEmpty(l.SchemeId) && !Calc(l, p).SchemeApplied)
+            {
+                formError = $"The scheme selected for {p.Name} does not apply. Change the quantity or choose \"No scheme\".";
+                return;
+            }
+        }
+        if (lines.Count == 0 && reason.Trim().Length < 3)
+        {
+            formError = "Enter a reason for no order (at least 3 characters).";
+            return;
+        }
+
+        saving = true;
+        try
+        {
+            var geo = await Browser.GetLocationAsync();
+            if (!geo.Ok)
+            {
+                formError = geo.Error ?? "Could not get your location.";
+                return;
+            }
+
+            var party = SelectedParty;
+            var total = OrderTotal;
+            var req = new VisitRequest
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                CapturedAt = Fmt.LocalNow(),
+                BeatId = beatId,
+                PartyId = partyId,
+                Lat = geo.Lat,
+                Lng = geo.Lng,
+                NoOrderReason = lines.Count == 0 ? reason.Trim() : "",
+                Items = lines.Select(l => new OrderLineRequest
+                {
+                    ProductId = l.ProductId,
+                    Qty = l.Qty,
+                    Unit = l.Unit,
+                    SchemeId = l.SchemeId
+                }).ToList()
+            };
+            var label = $"{party?.Name} - " + (lines.Count > 0 ? $"order NPR {Fmt.Money(total)}" : "no order");
+
+            await Sync.EnqueueAsync(OfflineSync.KindVisit, req.Id, req, label);
+
+            lines.Clear();
+            reason = "";
+            partyId = "";
+            StateHasChanged();
+
+            await SyncNowAsync();
+            var sent = (await Sync.GetQueueAsync()).All(q => q.Id != req.Id);
+            if (sent)
+            {
+                if (req.Items.Count > 0) Toast.Success($"Order for {party?.Name} saved. Share it on WhatsApp.", "Order saved");
+                else Toast.Success($"Visit to {party?.Name} saved.", "Visit saved");
+            }
+            else
+            {
+                Toast.Warning("Saved on this phone. It will be sent automatically when the connection returns.", "Saved offline");
+            }
+        }
+        catch (Exception ex)
+        {
+            formError = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task SyncNowAsync()
+    {
+        await Sync.SyncAsync();
+        await RefreshQueueAsync();
+        StateHasChanged();
+    }
+
+    private async Task RefreshQueueAsync()
+    {
+        queue = await Sync.GetQueueAsync();
+        results = await Sync.GetResultsAsync();
+    }
+
+    private async Task RetryAsync(string id)
+    {
+        await Sync.RetryAsync(id);
+        await RefreshQueueAsync();
+    }
+
+    private async Task RemoveQueuedAsync(QueuedRecord q)
+    {
+        var ok = await Confirm.AskAsync("Remove this record?", $"\"{q.Label}\" will not be sent. Enter the visit again if needed.", "Remove", danger: true);
+        if (!ok) return;
+        await Sync.RemoveAsync(q.Id);
+        await RefreshQueueAsync();
+        Toast.Info("Record removed.");
+    }
+
+    private async Task ShareAsync(VisitResult r)
+    {
+        await Browser.OpenUrlAsync("https://wa.me/?text=" + Uri.EscapeDataString(r.WhatsAppText));
+    }
+
+    private async Task DismissAsync(VisitResult r)
+    {
+        await Sync.MarkSharedAsync(r.VisitId);
+        await RefreshQueueAsync();
+    }
+
+    private void OnSyncChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            await RefreshQueueAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        Sync.Changed -= OnSyncChanged;
+    }
+}
+}

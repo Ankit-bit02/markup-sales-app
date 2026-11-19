@@ -1,0 +1,275 @@
+@typeparam TItem where TItem : class, IEntity, IActivatable, new()
+@inject ApiClient Api
+@inject ToastService Toast
+@inject ConfirmService Confirm
+
+<div class="card">
+    <div class="card-header">
+        <h2>
+            @if (!string.IsNullOrEmpty(IconName))
+            {
+                <Icon Name="@IconName" />
+            }
+            @Title
+        </h2>
+        @if (items != null)
+        {
+            <span class="count">@Visible.Count()</span>
+        }
+        <span class="spacer"></span>
+        <button class="btn btn-primary" @onclick="Add"><Icon Name="plus" /> Add @ItemName</button>
+    </div>
+
+    <div class="toolbar">
+        <div class="search input-icon">
+            <Icon Name="search" />
+            <input placeholder="@SearchPlaceholder" @bind="search" @bind:event="oninput" />
+        </div>
+        <label class="check"><input type="checkbox" @bind="showInactive" /> Show inactive</label>
+        <span class="spacer"></span>
+        <button class="btn btn-ghost btn-sm" @onclick="LoadAsync" title="Refresh"><Icon Name="refresh" Class="sm" /> Refresh</button>
+    </div>
+
+    <Alert Kind="error" Message="@loadError" Class="mt-2" />
+
+    @if (items == null)
+    {
+        <div class="loading"><span class="spinner"></span> Loading...</div>
+    }
+    else if (!Visible.Any())
+    {
+        <EmptyState IconName='@(string.IsNullOrEmpty(IconName) ? "inbox" : IconName)'
+                    Title='@(items.Count == 0 ? $"No {ItemNamePlural} yet" : "No matching records")'
+                    Text='@(items.Count == 0 ? $"Add your first {ItemName} to get started." : "Try another search, or tick Show inactive.")'>
+            @if (items.Count == 0)
+            {
+                <button class="btn btn-primary" @onclick="Add"><Icon Name="plus" /> Add @ItemName</button>
+            }
+        </EmptyState>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        @HeaderCells
+                        <th>Status</th>
+                        <th class="text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Visible)
+                    {
+                        <tr class='@(item.IsActive ? "" : "inactive")' @key="item.Id">
+                            @RowCells(item)
+                            <td>
+                                @if (item.IsActive)
+                                {
+                                    <span class="badge badge-success">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-muted">Inactive</span>
+                                }
+                            </td>
+                            <td class="actions-cell">
+                                <button class="btn btn-sm" title="Edit" @onclick="() => Edit(item)"><Icon Name="pencil" Class="sm" /> Edit</button>
+                                @if (item.IsActive)
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" title="Deactivate" @onclick="() => DeactivateAsync(item)"><Icon Name="ban" Class="sm" /></button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm" title="Activate again" @onclick="() => ReactivateAsync(item)"><Icon Name="undo" Class="sm" /></button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (editing != null)
+{
+    <div class="modal-backdrop">
+        <div class="modal" role="dialog" aria-modal="true">
+            <EditForm Model="editing" OnValidSubmit="SaveAsync">
+                <DataAnnotationsValidator />
+                <div class="modal-header">
+                    <h2>@(isNew ? $"Add {ItemName}" : $"Edit {ItemName}")</h2>
+                    <button type="button" class="btn btn-ghost btn-icon" aria-label="Close" @onclick="CancelEdit"><Icon Name="x" /></button>
+                </div>
+                <div class="modal-body">
+                    <Alert Kind="error" Message="@formError" />
+                    <ValidationSummary />
+                    <div class="form-grid cols-2">
+                        @FormFields(editing)
+                        <label class="check full"><InputCheckbox @bind-Value="editing.IsActive" /> Active</label>
+                    </div>
+                    <p class="muted small mt-2 mb-0">Fields marked <span style="color:var(--danger)">*</span> are required.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn" @onclick="CancelEdit" disabled="@busy">Cancel</button>
+                    <button type="submit" class="btn btn-primary" disabled="@busy">
+                        @if (busy)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="check" />
+                        }
+                        <span>@(isNew ? $"Add {ItemName}" : "Save changes")</span>
+                    </button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly System.Text.Json.JsonSerializerOptions JsonOpts = new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string ItemName { get; set; } = "record";
+    [Parameter] public string ItemNamePlural { get; set; } = "records";
+    [Parameter] public string IconName { get; set; } = "";
+    [Parameter, EditorRequired] public string ApiPath { get; set; } = "";
+    [Parameter] public RenderFragment? HeaderCells { get; set; }
+    [Parameter, EditorRequired] public RenderFragment<TItem> RowCells { get; set; } = default!;
+    [Parameter, EditorRequired] public RenderFragment<TItem> FormFields { get; set; } = default!;
+    [Parameter] public Func<TItem, string>? SearchText { get; set; }
+    [Parameter] public Func<TItem>? NewItem { get; set; }
+    [Parameter] public Func<IEnumerable<TItem>, IEnumerable<TItem>>? Sort { get; set; }
+
+    /// <summary>Raised after any save or (de)activation, so a page can refresh related lists.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private List<TItem>? items;
+    private TItem? editing;
+    private bool isNew;
+    private bool busy;
+    private bool showInactive;
+    private string search = "";
+    private string? loadError;
+    private string? formError;
+
+    private string SearchPlaceholder => $"Search {ItemNamePlural}...";
+
+    private string Capitalized => ItemName.Length > 0 ? char.ToUpperInvariant(ItemName[0]) + ItemName[1..] : ItemName;
+
+    private IEnumerable<TItem> Visible
+    {
+        get
+        {
+            IEnumerable<TItem> list = items ?? new List<TItem>();
+            if (!showInactive) list = list.Where(x => x.IsActive);
+            var f = search.Trim();
+            if (f.Length > 0 && SearchText != null)
+                list = list.Where(x => SearchText(x).Contains(f, StringComparison.OrdinalIgnoreCase));
+            return Sort != null ? Sort(list) : list;
+        }
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    public async Task LoadAsync()
+    {
+        loadError = null;
+        try
+        {
+            items = await Api.GetAsync<List<TItem>>(ApiPath);
+        }
+        catch (ApiException ex)
+        {
+            loadError = ex.Message;
+            items ??= new List<TItem>();
+        }
+    }
+
+    private void Add()
+    {
+        formError = null;
+        editing = NewItem != null ? NewItem() : new TItem();
+        editing.IsActive = true;
+        isNew = true;
+    }
+
+    private void Edit(TItem item)
+    {
+        formError = null;
+        // Work on a copy so Cancel leaves the list unchanged.
+        var json = System.Text.Json.JsonSerializer.Serialize(item, JsonOpts);
+        editing = System.Text.Json.JsonSerializer.Deserialize<TItem>(json, JsonOpts);
+        isNew = false;
+    }
+
+    private void CancelEdit()
+    {
+        editing = null;
+        formError = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (editing == null) return;
+        busy = true;
+        formError = null;
+        try
+        {
+            if (isNew) await Api.PostAsync<TItem>(ApiPath, editing);
+            else await Api.PutAsync<TItem>($"{ApiPath}/{Uri.EscapeDataString(editing.Id)}", editing);
+            Toast.Success(isNew ? $"{Capitalized} added successfully." : $"{Capitalized} updated successfully.", "Saved");
+            editing = null;
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (ApiException ex)
+        {
+            formError = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task DeactivateAsync(TItem item)
+    {
+        var ok = await Confirm.AskAsync($"Deactivate {ItemName}?",
+            $"This {ItemName} will be hidden from lists and drop-downs, but kept in history and reports. You can activate it again later.",
+            "Deactivate", danger: true);
+        if (!ok) return;
+        try
+        {
+            await Api.DeleteAsync($"{ApiPath}/{Uri.EscapeDataString(item.Id)}");
+            Toast.Success($"{Capitalized} deactivated.");
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Could not deactivate");
+        }
+    }
+
+    private async Task ReactivateAsync(TItem item)
+    {
+        try
+        {
+            item.IsActive = true;
+            await Api.PutAsync<TItem>($"{ApiPath}/{Uri.EscapeDataString(item.Id)}", item);
+            Toast.Success($"{Capitalized} is active again.");
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (ApiException ex)
+        {
+            item.IsActive = false;
+            Toast.Error(ex.Message, "Could not activate");
+        }
+    }
+}

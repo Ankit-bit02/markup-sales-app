@@ -1,0 +1,96 @@
+@page "/admin/products"
+
+<PageTitle>Products - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Products" Subtitle="Product codes, units and rates. Orders are priced at the RT (retailer) rate per base unit." IconName="package" />
+
+    <MasterList TItem="Product" Title="All products" ItemName="product" ItemNamePlural="products" IconName="package"
+                ApiPath="api/masters/products"
+                SearchText='@(p => $"{p.Code} {p.Name} {p.GroupName}")'
+                Sort="@(l => l.OrderBy(p => p.GroupName).ThenBy(p => p.Name))"
+                NewItem='@(() => new Product { Unit = "Pcs", ConvFactor = 1, IsActive = true })'>
+        <HeaderCells>
+            <th>Product</th>
+            <th>Group</th>
+            <th>Units</th>
+            <th class="num">MRP NPR</th>
+            <th class="num">MRP INR</th>
+            <th class="num">DLR rate</th>
+            <th class="num">RT rate</th>
+        </HeaderCells>
+        <RowCells Context="p">
+            <td>
+                <div class="cell-title">@p.Name</div>
+                <div class="cell-sub">@p.Code</div>
+            </td>
+            <td>@p.GroupName</td>
+            <td>
+                @p.Unit
+                @if (!string.IsNullOrWhiteSpace(p.SecondUnit))
+                {
+                    <div class="cell-sub">@($"1 {p.SecondUnit} = {Fmt.Qty(p.ConvFactor)} {p.Unit}")</div>
+                }
+            </td>
+            <td class="num">@Fmt.Money(p.MrpNpr)</td>
+            <td class="num">@Fmt.Money(p.MrpInr)</td>
+            <td class="num">@Fmt.Money(p.DealerRate)</td>
+            <td class="num"><b>@Fmt.Money(p.RetailerRate)</b></td>
+        </RowCells>
+        <FormFields Context="p">
+            <div class="section-title full">Product details</div>
+            <label class="field">
+                <span class="field-label req">Product code</span>
+                <InputText @bind-Value="p.Code" placeholder="e.g. P-1001" />
+                <ValidationMessage For="() => p.Code" />
+            </label>
+            <label class="field">
+                <span class="field-label">Group name</span>
+                <InputText @bind-Value="p.GroupName" placeholder="e.g. Biscuits" />
+            </label>
+            <label class="field full">
+                <span class="field-label req">Product name</span>
+                <InputText @bind-Value="p.Name" />
+                <ValidationMessage For="() => p.Name" />
+            </label>
+
+            <div class="section-title full">Units</div>
+            <label class="field">
+                <span class="field-label req">Base unit</span>
+                <InputText @bind-Value="p.Unit" placeholder="e.g. Pcs" />
+                <span class="hint">Smallest selling unit. All rates are per base unit.</span>
+                <ValidationMessage For="() => p.Unit" />
+            </label>
+            <label class="field">
+                <span class="field-label">2nd unit</span>
+                <InputText @bind-Value="p.SecondUnit" placeholder="e.g. Box (optional)" />
+            </label>
+            <label class="field">
+                <span class='field-label @(string.IsNullOrWhiteSpace(p.SecondUnit) ? "" : "req")'>Base units in one 2nd unit</span>
+                <InputNumber @bind-Value="p.ConvFactor" step="any" disabled="@(string.IsNullOrWhiteSpace(p.SecondUnit))" />
+                <span class="hint">Example: 1 Box = 12 Pcs, enter 12.</span>
+                <ValidationMessage For="() => p.ConvFactor" />
+            </label>
+            <span></span>
+
+            <div class="section-title full">Rates (per base unit)</div>
+            <label class="field">
+                <span class="field-label">MRP (NPR)</span>
+                <InputNumber @bind-Value="p.MrpNpr" step="any" />
+            </label>
+            <label class="field">
+                <span class="field-label">MRP (INR)</span>
+                <InputNumber @bind-Value="p.MrpInr" step="any" />
+            </label>
+            <label class="field">
+                <span class="field-label">Dealer rate (DLR)</span>
+                <InputNumber @bind-Value="p.DealerRate" step="any" />
+            </label>
+            <label class="field">
+                <span class="field-label">Retailer rate (RT)</span>
+                <InputNumber @bind-Value="p.RetailerRate" step="any" />
+                <span class="hint">Used to price orders.</span>
+            </label>
+        </FormFields>
+    </MasterList>
+</RoleGuard>

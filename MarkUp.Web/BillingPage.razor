@@ -1,0 +1,354 @@
+@page "/billing"
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject ToastService Toast
+@inject ConfirmService Confirm
+
+<PageTitle>Orders &amp; Billing - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.AdminOrBill">
+    <PageHeader Title="Orders and Billing" Subtitle="Mark orders as Bill done when the bill is made. Only billed orders count as sales." IconName="receipt">
+        <Actions>
+            <button class="btn" @onclick="LoadAsync" disabled="@loading">
+                @if (loading)
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="refresh" />
+                }
+                <span>Refresh</span>
+            </button>
+        </Actions>
+    </PageHeader>
+
+    <div class="stats">
+        <div class="stat"><div class="stat-label">Today's orders</div><div class="stat-value">@(today?.Count.ToString() ?? "–")</div></div>
+        <div class="stat"><div class="stat-label">Waiting to bill today</div><div class="stat-value">@(today?.Count(o => o.Status == OrderStatus.Pending).ToString() ?? "–")</div></div>
+        <div class="stat"><div class="stat-label">Billed today</div><div class="stat-value">@(today == null ? "–" : "NPR " + Fmt.Money(today.Where(o => o.Status == OrderStatus.Billed).Sum(o => o.TotalValue)))</div></div>
+        <div class="stat"><div class="stat-label">Old pending</div><div class="stat-value">@(pending?.Count.ToString() ?? "–")</div></div>
+    </div>
+
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div class="tabs">
+            <button class='@(tab == "today" ? "active" : "")' @onclick='() => { tab = "today"; cancelId = null; }'>
+                Today's Orders <span class="tab-count">@(today?.Count ?? 0)</span>
+            </button>
+            <button class='@(tab == "pending" ? "active" : "")' @onclick='() => { tab = "pending"; cancelId = null; }'>
+                Old Pending Orders <span class="tab-count">@(pending?.Count ?? 0)</span>
+            </button>
+        </div>
+        <div class="input-icon" style="min-width:240px;flex:0 1 340px">
+            <Icon Name="search" />
+            <input placeholder="Search party, order no, salesperson" @bind="search" @bind:event="oninput" />
+        </div>
+    </div>
+
+    <Alert Kind="error" Message="@error" />
+    @if (tab == "pending")
+    {
+        <Alert Kind="info">Orders from earlier days that are not billed yet, including cancelled ones. Tick <b>Bill done</b> when the bill is made.</Alert>
+    }
+
+    @if (Current == null)
+    {
+        <div class="card"><div class="loading"><span class="spinner"></span> Loading orders...</div></div>
+    }
+    else if (!Filtered.Any())
+    {
+        <div class="card">
+            <EmptyState IconName="receipt"
+                        Title='@(search.Trim().Length > 0 ? "No matching orders" : tab == "today" ? "No orders yet today" : "Nothing pending")'
+                        Text='@(search.Trim().Length > 0 ? "Try another search." : tab == "today" ? "Orders appear here as salespeople save them. Tap Refresh to check again." : "All earlier orders have been billed.")' />
+        </div>
+    }
+    else
+    {
+        <p class="muted small">Showing @Filtered.Count() order(s) &middot; NPR @Fmt.Money(Filtered.Sum(o => o.TotalValue))</p>
+        foreach (var o in Filtered)
+        {
+            <div class="card order-card" @key="o.Id">
+                <div class="order-top">
+                    <span class="order-no">@o.OrderNo</span>
+                    <span class="badge @o.Status">@StatusLabel(o.Status)</span>
+                    <span class="order-time"><Icon Name="clock" Class="sm" /> @Fmt.Date(o.Date) @o.Time</span>
+                    <span class="order-total">NPR @Fmt.Money(o.TotalValue)</span>
+                </div>
+
+                <div class="order-meta">
+                    <div class="meta-item">
+                        <Icon Name="store" Class="sm" />
+                        <div>
+                            <span class="meta-label">Party</span>
+                            <span class="meta-value"><b>@o.PartyName</b></span>
+                            @if (!string.IsNullOrWhiteSpace(o.PartyAddress))
+                            {
+                                <div class="muted small">@o.PartyAddress</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(o.PartyContactPerson) || !string.IsNullOrWhiteSpace(o.PartyPhone))
+                            {
+                                <div class="muted small">@o.PartyContactPerson @o.PartyPhone</div>
+                            }
+                        </div>
+                    </div>
+                    <div class="meta-item">
+                        <Icon Name="user" Class="sm" />
+                        <div>
+                            <span class="meta-label">Salesperson</span>
+                            <span class="meta-value">@o.SalesPersonName</span>
+                            <div class="muted small">@o.BeatName &middot; @o.DealerName</div>
+                        </div>
+                    </div>
+                    <div class="meta-item">
+                        <Icon Name="map-pin" Class="sm" />
+                        <div>
+                            <span class="meta-label">Order location</span>
+                            <a class="meta-value" href="@Fmt.MapLink(o.Lat, o.Lng)" target="_blank" rel="noopener">
+                                @(string.IsNullOrWhiteSpace(o.LocationName) ? "Open map" : o.LocationName) <Icon Name="external" Class="sm" />
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table class="order-items">
+                        <thead>
+                            <tr><th>Product</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var it in o.Items)
+                            {
+                                <tr>
+                                    <td>
+                                        @it.ProductName
+                                        @if (!string.IsNullOrEmpty(it.SchemeName))
+                                        {
+                                            <div class="sub"><Icon Name="tag" Class="sm" /> @it.SchemeName</div>
+                                        }
+                                    </td>
+                                    <td class="num">
+                                        @Fmt.Qty(it.Qty) @it.UnitName
+                                        @if (it.FreeQty > 0)
+                                        {
+                                            <div class="sub free">+@Fmt.Qty(it.FreeQty) free</div>
+                                        }
+                                    </td>
+                                    <td class="num">@Fmt.Money(it.Rate)</td>
+                                    <td class="num">
+                                        @Fmt.Money(it.LineValue)
+                                        @if (it.Discount > 0)
+                                        {
+                                            <div class="sub">&minus;@Fmt.Money(it.Discount) disc.</div>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (o.Status == OrderStatus.Cancelled)
+                {
+                    <div class="order-note">
+                        <Alert Kind="error" Title="Cancelled" Class="compact">
+                            @o.CancelReason <span class="muted">— @o.CancelledByName, @o.CancelledAt</span>
+                        </Alert>
+                    </div>
+                }
+                @if (o.Status == OrderStatus.Billed)
+                {
+                    <div class="order-note">
+                        <Alert Kind="success" Class="compact">Bill done by <b>@o.BilledByName</b> on @o.BilledAt</Alert>
+                    </div>
+                }
+
+                @if (cancelId == o.Id)
+                {
+                    <div class="cancel-box mt-1">
+                        <label class="field">
+                            <span class="field-label req">Reason for cancellation</span>
+                            <textarea maxlength="200" rows="2" @bind="cancelReason" @bind:event="oninput" placeholder="e.g. Party refused delivery, out of stock"></textarea>
+                            <span class="hint">This reason appears in the Remarks column of reports.</span>
+                        </label>
+                        <div class="actions mt-1">
+                            <button class="btn btn-danger" disabled="@(!CanConfirmCancel(o))" @onclick="() => CancelAsync(o)">
+                                @if (busyId == o.Id)
+                                {
+                                    <span class="spinner"></span>
+                                }
+                                else
+                                {
+                                    <Icon Name="x-circle" />
+                                }
+                                <span>Confirm cancel</span>
+                            </button>
+                            <button class="btn" disabled="@(busyId == o.Id)" @onclick="() => { cancelId = null; }">Back</button>
+                        </div>
+                    </div>
+                }
+                else if (o.Status != OrderStatus.Billed)
+                {
+                    <div class="order-actions mt-1">
+                        <button class="btn btn-success" disabled="@(busyId == o.Id)" @onclick="() => BillAsync(o)">
+                            @if (busyId == o.Id)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            else
+                            {
+                                <Icon Name="check" />
+                            }
+                            <span>Bill done</span>
+                        </button>
+                        @if (o.Status == OrderStatus.Pending)
+                        {
+                            <button class="btn btn-outline-danger" disabled="@(busyId == o.Id)" @onclick="() => StartCancel(o)"><Icon Name="x-circle" /> Cancel order</button>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    }
+</RoleGuard>
+
+@code {
+    private string tab = "today";
+    private List<OrderView>? today;
+    private List<OrderView>? pending;
+    private string search = "";
+    private string? error;
+    private bool loading;
+    private string? busyId;
+    private string? cancelId;
+    private string cancelReason = "";
+
+    private bool CanConfirmCancel(OrderView o) => busyId != o.Id && cancelReason.Trim().Length >= 3;
+
+    private List<OrderView>? Current => tab == "today" ? today : pending;
+
+    private IEnumerable<OrderView> Filtered
+    {
+        get
+        {
+            var list = Current ?? new List<OrderView>();
+            var f = search.Trim();
+            if (f.Length == 0) return list;
+            return list.Where(o =>
+                o.PartyName.Contains(f, StringComparison.OrdinalIgnoreCase) ||
+                o.OrderNo.Contains(f, StringComparison.OrdinalIgnoreCase) ||
+                o.SalesPersonName.Contains(f, StringComparison.OrdinalIgnoreCase) ||
+                o.BeatName.Contains(f, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private static string StatusLabel(string status) => status switch
+    {
+        OrderStatus.Billed => "Bill done",
+        OrderStatus.Cancelled => "Cancelled",
+        _ => "Pending"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin, Roles.Bill) || Auth.MustChangePassword) return;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            today = await Api.GetAsync<List<OrderView>>("api/billing/today");
+            pending = await Api.GetAsync<List<OrderView>>("api/billing/pending");
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+            today ??= new List<OrderView>();
+            pending ??= new List<OrderView>();
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task BillAsync(OrderView o)
+    {
+        var ok = await Confirm.AskAsync($"Mark {o.OrderNo} as Bill done?",
+            $"{o.PartyName} · NPR {Fmt.Money(o.TotalValue)}. A billed order counts as a sale and cannot be cancelled.",
+            "Yes, bill done");
+        if (!ok) return;
+
+        busyId = o.Id;
+        try
+        {
+            var updated = await Api.PostAsync<OrderView>($"api/billing/{Uri.EscapeDataString(o.Id)}/bill", new { });
+            Replace(updated);
+            Toast.Success($"{updated.OrderNo} for {updated.PartyName} is marked Bill done.", "Billed");
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Could not bill the order");
+        }
+        finally
+        {
+            busyId = null;
+        }
+    }
+
+    private void StartCancel(OrderView o)
+    {
+        cancelId = o.Id;
+        cancelReason = "";
+    }
+
+    private async Task CancelAsync(OrderView o)
+    {
+        var reason = cancelReason.Trim();
+        if (reason.Length < 3)
+        {
+            Toast.Warning("Enter a reason for cancelling (at least 3 characters).");
+            return;
+        }
+
+        busyId = o.Id;
+        try
+        {
+            var updated = await Api.PostAsync<OrderView>($"api/billing/{Uri.EscapeDataString(o.Id)}/cancel", new CancelOrderRequest { Reason = reason });
+            Replace(updated);
+            cancelId = null;
+            Toast.Info($"{updated.OrderNo} has been cancelled.", "Order cancelled");
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Could not cancel the order");
+        }
+        finally
+        {
+            busyId = null;
+        }
+    }
+
+    private void Replace(OrderView updated)
+    {
+        ReplaceIn(today, updated, removeIfBilled: false);
+        ReplaceIn(pending, updated, removeIfBilled: true);
+    }
+
+    private static void ReplaceIn(List<OrderView>? list, OrderView updated, bool removeIfBilled)
+    {
+        if (list == null) return;
+        var i = list.FindIndex(x => x.Id == updated.Id);
+        if (i < 0)
+        {
+            return;
+        }
+        // A billed order leaves the Old Pending list.
+        if (removeIfBilled && updated.Status == OrderStatus.Billed) list.RemoveAt(i);
+        else list[i] = updated;
+    }
+}

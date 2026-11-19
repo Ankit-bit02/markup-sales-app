@@ -1,0 +1,124 @@
+@page "/admin/settings"
+
+<PageTitle>Master Settings - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Master Settings" Subtitle="Lists and calendars used across the app." IconName="settings" />
+
+    <div class="tabs">
+        <button class='@(tab == "types" ? "active" : "")' @onclick='() => { tab = "types"; }'><Icon Name="store" Class="sm" /> Party types</button>
+        <button class='@(tab == "calendar" ? "active" : "")' @onclick='() => { tab = "calendar"; }'><Icon Name="calendar" Class="sm" /> Weekly off days</button>
+        <button class='@(tab == "holidays" ? "active" : "")' @onclick='() => { tab = "holidays"; }'><Icon Name="calendar" Class="sm" /> Holidays</button>
+    </div>
+
+    @if (tab == "types")
+    {
+        <Alert Kind="info">Party types fill the <b>Party type</b> drop-down when adding parties, e.g. Retailer, Wholesaler.</Alert>
+        <MasterList TItem="PartyType" Title="Party types" ItemName="party type" ItemNamePlural="party types" IconName="store"
+                    ApiPath="api/masters/party-types"
+                    SearchText="@(t => t.Name)"
+                    Sort="@(l => l.OrderBy(t => t.Name))">
+            <HeaderCells>
+                <th>Party type</th>
+            </HeaderCells>
+            <RowCells Context="t">
+                <td class="cell-title">@t.Name</td>
+            </RowCells>
+            <FormFields Context="t">
+                <label class="field full">
+                    <span class="field-label req">Name</span>
+                    <InputText @bind-Value="t.Name" placeholder="e.g. Retailer" />
+                    <ValidationMessage For="() => t.Name" />
+                </label>
+            </FormFields>
+        </MasterList>
+    }
+    else if (tab == "calendar")
+    {
+        <Alert Kind="info">Weekly off days are not counted as working days for targets. If a year has no setting, <b>Saturday</b> is used.</Alert>
+        <MasterList TItem="CalendarSetting" Title="Weekly off days (per year)" ItemName="calendar year" ItemNamePlural="years" IconName="calendar"
+                    ApiPath="api/masters/calendar-settings"
+                    SearchText="@(c => c.Year.ToString())"
+                    Sort="@(l => l.OrderByDescending(c => c.Year))"
+                    NewItem="@(() => new CalendarSetting { Year = Fmt.Today().Year, WeeklyOffDays = nameof(DayOfWeek.Saturday), IsActive = true })">
+            <HeaderCells>
+                <th>Year</th>
+                <th>Weekly off days</th>
+            </HeaderCells>
+            <RowCells Context="c">
+                <td class="cell-title">@c.Year</td>
+                <td>@(string.IsNullOrWhiteSpace(c.WeeklyOffDays) ? "None" : c.WeeklyOffDays.Replace(",", ", "))</td>
+            </RowCells>
+            <FormFields Context="c">
+                <label class="field">
+                    <span class="field-label req">Year</span>
+                    <InputNumber @bind-Value="c.Year" />
+                    <ValidationMessage For="() => c.Year" />
+                </label>
+                <div class="field">
+                    <span class="field-label">Weekly off days</span>
+                    <div class="row">
+                        @foreach (var day in Days)
+                        {
+                            <label class="check">
+                                <input type="checkbox" checked="@HasDay(c, day)" @onchange="e => ToggleDay(c, day, e)" />
+                                @(day.ToString()[..3])
+                            </label>
+                        }
+                    </div>
+                </div>
+            </FormFields>
+        </MasterList>
+    }
+    else
+    {
+        <Alert Kind="info">Holidays are not counted as working days for daily and MTD targets.</Alert>
+        <MasterList TItem="Holiday" Title="Holidays" ItemName="holiday" ItemNamePlural="holidays" IconName="calendar"
+                    ApiPath="api/masters/holidays"
+                    SearchText='@(h => h.Name + " " + Fmt.Date(h.Date))'
+                    Sort="@(l => l.OrderByDescending(h => h.Date))"
+                    NewItem="@(() => new Holiday { Date = Fmt.Today(), IsActive = true })">
+            <HeaderCells>
+                <th>Date</th>
+                <th>Day</th>
+                <th>Holiday</th>
+            </HeaderCells>
+            <RowCells Context="h">
+                <td class="nowrap">@Fmt.Date(h.Date)</td>
+                <td>@h.Date.DayOfWeek</td>
+                <td class="cell-title">@h.Name</td>
+            </RowCells>
+            <FormFields Context="h">
+                <label class="field">
+                    <span class="field-label req">Date</span>
+                    <InputDate @bind-Value="h.Date" />
+                </label>
+                <label class="field">
+                    <span class="field-label req">Holiday name</span>
+                    <InputText @bind-Value="h.Name" placeholder="e.g. Dashain" />
+                    <ValidationMessage For="() => h.Name" />
+                </label>
+            </FormFields>
+        </MasterList>
+    }
+</RoleGuard>
+
+@code {
+    private string tab = "types";
+
+    private static readonly DayOfWeek[] Days =
+    {
+        DayOfWeek.Sunday, DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
+        DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday
+    };
+
+    private static bool HasDay(CalendarSetting c, DayOfWeek day) => Pricing.ParseWeeklyOffs(c.WeeklyOffDays).Contains(day);
+
+    private static void ToggleDay(CalendarSetting c, DayOfWeek day, ChangeEventArgs e)
+    {
+        var set = Pricing.ParseWeeklyOffs(c.WeeklyOffDays);
+        if (e.Value is bool on && on) set.Add(day);
+        else set.Remove(day);
+        c.WeeklyOffDays = string.Join(",", Days.Where(set.Contains));
+    }
+}

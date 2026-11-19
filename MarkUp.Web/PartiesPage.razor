@@ -1,0 +1,112 @@
+@page "/admin/parties"
+@inject ApiClient Api
+@inject AuthSession Auth
+
+<PageTitle>Parties - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Parties" Subtitle="Shops on each beat. Salespeople see the parties of their own beats." IconName="store" />
+
+    <Alert Kind="error" Message="@error" />
+    @if (loaded && partyTypes.Count(t => t.IsActive) == 0)
+    {
+        <Alert Kind="warning" Title="Add party types first">Every party needs a type (e.g. Retailer). <a href="admin/settings">Go to Master Settings</a>.</Alert>
+    }
+    else if (loaded && beats.Count(b => b.IsActive) == 0)
+    {
+        <Alert Kind="warning" Title="Add a beat first">Every party belongs to a beat. <a href="admin/beats">Go to Beats</a>.</Alert>
+    }
+
+    <MasterList TItem="Party" Title="All parties" ItemName="party" ItemNamePlural="parties" IconName="store"
+                ApiPath="api/masters/parties"
+                SearchText='@(p => $"{p.Name} {p.ContactPerson} {p.Phone} {p.Address} {BeatName(p.BeatId)}")'
+                Sort="@(l => l.OrderBy(p => BeatName(p.BeatId)).ThenBy(p => p.Name))">
+        <HeaderCells>
+            <th>Party</th>
+            <th>Beat</th>
+            <th>Type</th>
+            <th>Contact</th>
+            <th>Address</th>
+        </HeaderCells>
+        <RowCells Context="p">
+            <td class="cell-title">@p.Name</td>
+            <td>@BeatName(p.BeatId)</td>
+            <td><span class="badge badge-info no-dot">@TypeName(p.PartyTypeId)</span></td>
+            <td>
+                @p.ContactPerson
+                @if (!string.IsNullOrWhiteSpace(p.Phone))
+                {
+                    <div class="cell-sub">@p.Phone</div>
+                }
+            </td>
+            <td>@p.Address</td>
+        </RowCells>
+        <FormFields Context="p">
+            <label class="field full">
+                <span class="field-label req">Party name</span>
+                <InputText @bind-Value="p.Name" placeholder="e.g. Ram Kirana Store" />
+                <ValidationMessage For="() => p.Name" />
+            </label>
+            <label class="field">
+                <span class="field-label req">Beat</span>
+                <InputSelect @bind-Value="p.BeatId">
+                    <option value="">Select beat</option>
+                    @foreach (var b in beats.Where(x => x.IsActive || x.Id == p.BeatId))
+                    {
+                        <option value="@b.Id">@b.Name</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="() => p.BeatId" />
+            </label>
+            <label class="field">
+                <span class="field-label req">Party type</span>
+                <InputSelect @bind-Value="p.PartyTypeId">
+                    <option value="">Select type</option>
+                    @foreach (var t in partyTypes.Where(x => x.IsActive || x.Id == p.PartyTypeId))
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="() => p.PartyTypeId" />
+            </label>
+            <label class="field">
+                <span class="field-label">Contact person</span>
+                <InputText @bind-Value="p.ContactPerson" />
+            </label>
+            <label class="field">
+                <span class="field-label">Contact number</span>
+                <InputText @bind-Value="p.Phone" inputmode="tel" placeholder="98XXXXXXXX" />
+                <ValidationMessage For="() => p.Phone" />
+            </label>
+            <label class="field full">
+                <span class="field-label">Address</span>
+                <InputText @bind-Value="p.Address" />
+            </label>
+        </FormFields>
+    </MasterList>
+</RoleGuard>
+
+@code {
+    private List<Beat> beats = new();
+    private List<PartyType> partyTypes = new();
+    private string? error;
+    private bool loaded;
+
+    private string BeatName(string id) => beats.FirstOrDefault(b => b.Id == id)?.Name ?? "";
+    private string TypeName(string id) => partyTypes.FirstOrDefault(t => t.Id == id)?.Name ?? "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin)) return;
+        try
+        {
+            beats = await Api.GetAsync<List<Beat>>("api/masters/beats");
+            partyTypes = await Api.GetAsync<List<PartyType>>("api/masters/party-types");
+            loaded = true;
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+    }
+}

@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+publish/
+.vercel/
+# Never commit Google service account keys or local secrets
+*-sa.json
+*.key.json
+secrets/
+appsettings.Local.json
+# Google service account key files (any name)
+markup-sales-*.json
+*service-account*.json
+*credentials*.json

@@ -1,0 +1,130 @@
+@page "/admin"
+@inject ApiClient Api
+@inject AuthSession Auth
+
+<PageTitle>Dashboard - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title='@($"Welcome, {FirstName}")' Subtitle="Overview of today's activity and quick links to manage the app." IconName="dashboard" />
+
+    <Alert Kind="error" Message="@error" />
+
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-label">Today's orders</div>
+            <div class="stat-value">@(loaded? todayCount.ToString() : "–")</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Today's order value</div>
+            <div class="stat-value">@(loaded ? "NPR " + Fmt.Money(todayValue) : "–")</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Billed today</div>
+            <div class="stat-value">@(loaded? billedToday.ToString() : "–")</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Old pending orders</div>
+            <div class="stat-value">@(loaded? pendingCount.ToString() : "–")</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2><Icon Name="layers" /> Setup &amp; masters</h2>
+            <span class="spacer"></span>
+            <span class="muted small">First time? Follow the numbers in order.</span>
+        </div>
+        <div class="card-body">
+            <div class="tiles">
+                <a class="tile" href="admin/settings">
+                    <span class="tile-icon"><Icon Name="settings" /></span>
+                    <span><b>Master Settings</b><small>Party types, weekly off days, holidays</small></span>
+                    <span class="step-no">1</span>
+                </a>
+                <a class="tile" href="admin/dealers">
+                    <span class="tile-icon"><Icon Name="building" /></span>
+                    <span><b>Dealers</b><small>Distributors the team works under</small></span>
+                    <span class="step-no">2</span>
+                </a>
+                <a class="tile" href="admin/users">
+                    <span class="tile-icon"><Icon Name="users" /></span>
+                    <span><b>Users</b><small>Admin, Sales and Billing logins</small></span>
+                    <span class="step-no">3</span>
+                </a>
+                <a class="tile" href="admin/beats">
+                    <span class="tile-icon"><Icon Name="route" /></span>
+                    <span><b>Beats</b><small>Routes fixed to salespeople</small></span>
+                    <span class="step-no">4</span>
+                </a>
+                <a class="tile" href="admin/parties">
+                    <span class="tile-icon"><Icon Name="store" /></span>
+                    <span><b>Parties</b><small>Shops on each beat</small></span>
+                    <span class="step-no">5</span>
+                </a>
+                <a class="tile" href="admin/products">
+                    <span class="tile-icon"><Icon Name="package" /></span>
+                    <span><b>Products</b><small>Codes, units and rates</small></span>
+                    <span class="step-no">6</span>
+                </a>
+                <a class="tile" href="admin/schemes">
+                    <span class="tile-icon"><Icon Name="tag" /></span>
+                    <span><b>Schemes</b><small>Discounts and free quantity</small></span>
+                    <span class="step-no">7</span>
+                </a>
+                <a class="tile" href="admin/targets">
+                    <span class="tile-icon"><Icon Name="target" /></span>
+                    <span><b>Targets</b><small>Monthly value and product targets</small></span>
+                    <span class="step-no">8</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2><Icon Name="chart" /> Daily work</h2>
+        </div>
+        <div class="card-body">
+            <div class="tiles">
+                <a class="tile" href="billing">
+                    <span class="tile-icon"><Icon Name="receipt" /></span>
+                    <span><b>Orders &amp; Billing</b><small>Mark orders Bill done or cancel them</small></span>
+                </a>
+                <a class="tile" href="reports">
+                    <span class="tile-icon"><Icon Name="chart" /></span>
+                    <span><b>Reports</b><small>DSR, targets, party and product lists</small></span>
+                </a>
+            </div>
+        </div>
+    </div>
+</RoleGuard>
+
+@code {
+    private bool loaded;
+    private int todayCount;
+    private decimal todayValue;
+    private int billedToday;
+    private int pendingCount;
+    private string? error;
+
+    private string FirstName => (Auth.Name ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin) || Auth.MustChangePassword) return;
+        try
+        {
+            var today = await Api.GetAsync<List<OrderView>>("api/billing/today");
+            var pending = await Api.GetAsync<List<OrderView>>("api/billing/pending");
+            todayCount = today.Count;
+            todayValue = today.Where(o => o.Status != OrderStatus.Cancelled).Sum(o => o.TotalValue);
+            billedToday = today.Count(o => o.Status == OrderStatus.Billed);
+            pendingCount = pending.Count(o => o.Status == OrderStatus.Pending);
+            loaded = true;
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+    }
+}

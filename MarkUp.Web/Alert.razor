@@ -1,0 +1,44 @@
+﻿@* Inline message box. Kind: success | error | warning | info *@
+@if (Visible)
+{
+    <div class="alert alert-@Kind @Class" role='@(Kind == "error" ? "alert" : "status")'>
+        <Icon Name="@IconName" />
+        <div class="alert-body">
+            @if (!string.IsNullOrEmpty(Title))
+            {
+                <b class="alert-title">@Title</b>
+            }
+            @if (ChildContent != null)
+            {
+                @ChildContent
+            }
+            else
+            {
+                @Message
+            }
+        </div>
+        @if (OnClose.HasDelegate)
+        {
+            <button class="alert-close" aria-label="Close" @onclick="OnClose"><Icon Name="x" Class="sm" /></button>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string Kind { get; set; } = "info";
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string? Message { get; set; }
+    [Parameter] public string Class { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private bool Visible => ChildContent != null || !string.IsNullOrWhiteSpace(Message);
+
+    private string IconName => Kind switch
+    {
+        "success" => "check-circle",
+        "error" => "x-circle",
+        "warning" => "alert",
+        _ => "info"
+    };
+}

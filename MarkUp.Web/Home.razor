@@ -1,0 +1,14 @@
+@page "/"
+@inject AuthSession Auth
+@inject NavigationManager Nav
+
+<PageTitle>MARK_UP Sales</PageTitle>
+
+@code {
+    protected override void OnInitialized()
+    {
+        if (!Auth.IsLoggedIn) Nav.NavigateTo("login", replace: true);
+        else if (Auth.MustChangePassword) Nav.NavigateTo("change-password", replace: true);
+        else Nav.NavigateTo(Auth.HomePath, replace: true);
+    }
+}

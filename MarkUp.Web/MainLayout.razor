@@ -1,0 +1,213 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject AuthSession Auth
+@inject NavigationManager Nav
+@inject OfflineSync Sync
+@inject Browser Browser
+@inject ConfirmService Confirm
+
+@if (Auth.IsLoggedIn && !Auth.MustChangePassword)
+{
+    <div class='shell @(menuOpen ? "menu-open" : "")'>
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <img src="icons/icon-192.png" alt="" />
+                <div>
+                    <b>MARK_UP</b>
+                    <small>Sales &amp; Billing</small>
+                </div>
+                <button class="btn btn-ghost btn-icon sidebar-close" aria-label="Close menu" @onclick="CloseMenu"><Icon Name="x" /></button>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section">Main</div>
+                @if (Auth.Role == Roles.Admin)
+                {
+                    <NavLink class="nav-item" href="admin" Match="NavLinkMatch.All"><Icon Name="dashboard" /><span>Dashboard</span></NavLink>
+                }
+                @if (Auth.Role == Roles.Sales)
+                {
+                    <NavLink class="nav-item" href="sales"><Icon Name="map-pin" /><span>Market Visit</span></NavLink>
+                }
+                @if (Auth.IsInRole(Roles.Admin, Roles.Bill))
+                {
+                    <NavLink class="nav-item" href="billing"><Icon Name="receipt" /><span>Orders &amp; Billing</span></NavLink>
+                }
+                <NavLink class="nav-item" href="reports"><Icon Name="chart" /><span>Reports</span></NavLink>
+
+                @if (Auth.Role == Roles.Admin)
+                {
+                    <div class="nav-section">Masters</div>
+                    <NavLink class="nav-item" href="admin/users"><Icon Name="users" /><span>Users</span></NavLink>
+                    <NavLink class="nav-item" href="admin/dealers"><Icon Name="building" /><span>Dealers</span></NavLink>
+                    <NavLink class="nav-item" href="admin/beats"><Icon Name="route" /><span>Beats</span></NavLink>
+                    <NavLink class="nav-item" href="admin/parties"><Icon Name="store" /><span>Parties</span></NavLink>
+                    <NavLink class="nav-item" href="admin/products"><Icon Name="package" /><span>Products</span></NavLink>
+                    <NavLink class="nav-item" href="admin/schemes"><Icon Name="tag" /><span>Schemes</span></NavLink>
+                    <NavLink class="nav-item" href="admin/targets"><Icon Name="target" /><span>Targets</span></NavLink>
+                    <NavLink class="nav-item" href="admin/settings"><Icon Name="settings" /><span>Master Settings</span></NavLink>
+                }
+
+                <div class="nav-section">Account</div>
+                <NavLink class="nav-item" href="change-password"><Icon Name="key" /><span>Change Password</span></NavLink>
+            </nav>
+
+            <div class="sidebar-user">
+                <span class="avatar">@Initials</span>
+                <div class="who">
+                    <b>@Auth.Name</b>
+                    <small>@RoleLabel</small>
+                </div>
+                <button class="btn btn-ghost btn-icon" title="Log out" aria-label="Log out" @onclick="LogoutAsync"><Icon Name="logout" /></button>
+            </div>
+        </aside>
+
+        <div class="backdrop" @onclick="CloseMenu"></div>
+
+        <div class="main">
+            <header class="topbar">
+                <button class="btn btn-ghost btn-icon menu-btn" aria-label="Open menu" @onclick="OpenMenu"><Icon Name="menu" /></button>
+                <span class="topbar-title">MARK_UP</span>
+                <span class="spacer"></span>
+                @if (!online)
+                {
+                    <span class="badge badge-warning">Offline</span>
+                }
+                <span class="badge badge-role-@Auth.Role no-dot">@RoleLabel</span>
+                <div class="topbar-user">
+                    <div class="who">
+                        <b>@Auth.Name</b>
+                    </div>
+                    <span class="avatar light">@Initials</span>
+                </div>
+            </header>
+
+            @if (!online)
+            {
+                <div class="offline-bar">
+                    <Icon Name="wifi-off" Class="sm" />
+                    You are offline. Saved visits will be sent automatically when the connection returns.
+                </div>
+            }
+
+            <main class="content">
+                @Body
+            </main>
+        </div>
+    </div>
+}
+else
+{
+    <main>
+        @Body
+    </main>
+}
+
+<Toasts />
+<ConfirmHost />
+
+@code {
+    private bool online = true;
+    private bool menuOpen;
+    private DotNetObjectReference<MainLayout>? selfRef;
+    private Timer? timer;
+
+    private string RoleLabel => Auth.Role switch
+    {
+        Roles.Sales => "Salesperson",
+        Roles.Bill => "Billing",
+        Roles.Admin => "Administrator",
+        _ => Auth.Role
+    };
+
+    private string Initials
+    {
+        get
+        {
+            var parts = (Auth.Name ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return "?";
+            var first = char.ToUpperInvariant(parts[0][0]);
+            return parts.Length > 1 ? $"{first}{char.ToUpperInvariant(parts[^1][0])}" : first.ToString();
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Auth.Changed += OnAuthChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        online = await Browser.IsOnlineAsync();
+        selfRef = DotNetObjectReference.Create(this);
+        await Browser.RegisterOnlineAsync(selfRef);
+
+        // Try to send waiting records every minute.
+        timer = new Timer(_ => InvokeAsync(TickAsync), null, TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(60));
+        StateHasChanged();
+    }
+
+    private async Task TickAsync()
+    {
+        var now = await Browser.IsOnlineAsync();
+        if (now != online)
+        {
+            online = now;
+            StateHasChanged();
+        }
+        if (online && Auth.Role == Roles.Sales) await Sync.SyncAsync();
+    }
+
+    [JSInvokable]
+    public async Task OnOnline()
+    {
+        online = true;
+        StateHasChanged();
+        if (Auth.Role == Roles.Sales) await Sync.SyncAsync();
+    }
+
+    private void OpenMenu() => menuOpen = true;
+
+    private void CloseMenu() => menuOpen = false;
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (!menuOpen) return;
+        menuOpen = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LogoutAsync()
+    {
+        if (Auth.Role == Roles.Sales)
+        {
+            var waiting = (await Sync.GetQueueAsync()).Count;
+            if (waiting > 0 && !await Confirm.AskAsync(
+                    "Records not sent yet",
+                    $"{waiting} record(s) are still waiting to be sent. They stay safely on this phone and will be sent when you log in again.",
+                    "Log out anyway"))
+                return;
+        }
+        else if (!await Confirm.AskAsync("Log out?", "You will need to sign in again to use the app.", "Log out"))
+        {
+            return;
+        }
+
+        menuOpen = false;
+        await Auth.ClearAsync();
+        Nav.NavigateTo("login", replace: true);
+    }
+
+    private void OnAuthChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Auth.Changed -= OnAuthChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+        timer?.Dispose();
+        selfRef?.Dispose();
+    }
+}

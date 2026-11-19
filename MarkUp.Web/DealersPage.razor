@@ -1,0 +1,45 @@
+@page "/admin/dealers"
+
+<PageTitle>Dealers - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Dealers" Subtitle="Distributors that salespeople and beats belong to." IconName="building" />
+
+    <MasterList TItem="Dealer" Title="All dealers" ItemName="dealer" ItemNamePlural="dealers" IconName="building"
+                ApiPath="api/masters/dealers"
+                SearchText='@(d => $"{d.Name} {d.ContactPerson} {d.Phone} {d.Address}")'
+                Sort="@(l => l.OrderBy(d => d.Name))">
+        <HeaderCells>
+            <th>Dealer</th>
+            <th>Contact person</th>
+            <th>Phone</th>
+            <th>Address</th>
+        </HeaderCells>
+        <RowCells Context="d">
+            <td class="cell-title">@d.Name</td>
+            <td>@d.ContactPerson</td>
+            <td class="nowrap">@d.Phone</td>
+            <td>@d.Address</td>
+        </RowCells>
+        <FormFields Context="d">
+            <label class="field full">
+                <span class="field-label req">Dealer name</span>
+                <InputText @bind-Value="d.Name" placeholder="e.g. Shree Traders" />
+                <ValidationMessage For="() => d.Name" />
+            </label>
+            <label class="field">
+                <span class="field-label">Contact person</span>
+                <InputText @bind-Value="d.ContactPerson" />
+            </label>
+            <label class="field">
+                <span class="field-label">Phone</span>
+                <InputText @bind-Value="d.Phone" inputmode="tel" placeholder="98XXXXXXXX" />
+                <ValidationMessage For="() => d.Phone" />
+            </label>
+            <label class="field full">
+                <span class="field-label">Address</span>
+                <InputText @bind-Value="d.Address" />
+            </label>
+        </FormFields>
+    </MasterList>
+</RoleGuard>

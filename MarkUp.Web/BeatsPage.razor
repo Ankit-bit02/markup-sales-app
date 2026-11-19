@@ -1,0 +1,91 @@
+@page "/admin/beats"
+@inject ApiClient Api
+@inject AuthSession Auth
+
+<PageTitle>Beats - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Beats" Subtitle="Routes or areas of shops. Each beat is fixed to one salesperson of its dealer." IconName="route" />
+
+    <Alert Kind="error" Message="@error" />
+    @if (loaded && dealers.Count(d => d.IsActive) == 0)
+    {
+        <Alert Kind="warning" Title="Add a dealer first">Beats belong to a dealer. <a href="admin/dealers">Go to Dealers</a>.</Alert>
+    }
+    else if (loaded && users.Count(u => u.IsActive && u.Role == Roles.Sales) == 0)
+    {
+        <Alert Kind="warning" Title="Add a salesperson first">Each beat needs a Sales user. <a href="admin/users">Go to Users</a>.</Alert>
+    }
+
+    <MasterList TItem="Beat" Title="All beats" ItemName="beat" ItemNamePlural="beats" IconName="route"
+                ApiPath="api/masters/beats"
+                SearchText='@(b => $"{b.Name} {DealerName(b.DealerId)} {UserName(b.AssignedUserId)}")'
+                Sort="@(l => l.OrderBy(b => DealerName(b.DealerId)).ThenBy(b => b.Name))">
+        <HeaderCells>
+            <th>Beat</th>
+            <th>Dealer</th>
+            <th>Salesperson</th>
+        </HeaderCells>
+        <RowCells Context="b">
+            <td class="cell-title">@b.Name</td>
+            <td>@DealerName(b.DealerId)</td>
+            <td>@UserName(b.AssignedUserId)</td>
+        </RowCells>
+        <FormFields Context="b">
+            <label class="field full">
+                <span class="field-label req">Beat name</span>
+                <InputText @bind-Value="b.Name" placeholder="e.g. Baneshwor Route" />
+                <ValidationMessage For="() => b.Name" />
+            </label>
+            <label class="field">
+                <span class="field-label req">Dealer</span>
+                <InputSelect @bind-Value="b.DealerId">
+                    <option value="">Select dealer</option>
+                    @foreach (var d in dealers.Where(x => x.IsActive || x.Id == b.DealerId))
+                    {
+                        <option value="@d.Id">@d.Name</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="() => b.DealerId" />
+            </label>
+            <label class="field">
+                <span class="field-label req">Salesperson</span>
+                <InputSelect @bind-Value="b.AssignedUserId">
+                    <option value="">Select salesperson</option>
+                    @foreach (var u in users.Where(x => x.Role == Roles.Sales && (x.IsActive || x.Id == b.AssignedUserId)
+                                        && (string.IsNullOrEmpty(b.DealerId) || x.DealerId == b.DealerId)))
+                    {
+                        <option value="@u.Id">@u.Name</option>
+                    }
+                </InputSelect>
+                <span class="hint">Only salespeople of the selected dealer are listed.</span>
+                <ValidationMessage For="() => b.AssignedUserId" />
+            </label>
+        </FormFields>
+    </MasterList>
+</RoleGuard>
+
+@code {
+    private List<Dealer> dealers = new();
+    private List<UserDto> users = new();
+    private string? error;
+    private bool loaded;
+
+    private string DealerName(string id) => dealers.FirstOrDefault(d => d.Id == id)?.Name ?? "";
+    private string UserName(string id) => users.FirstOrDefault(u => u.Id == id)?.Name ?? "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin)) return;
+        try
+        {
+            dealers = await Api.GetAsync<List<Dealer>>("api/masters/dealers");
+            users = await Api.GetAsync<List<UserDto>>("api/users");
+            loaded = true;
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+    }
+}

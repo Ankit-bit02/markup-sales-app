@@ -1,0 +1,134 @@
+@page "/admin/schemes"
+@inject ApiClient Api
+@inject AuthSession Auth
+
+<PageTitle>Schemes - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Scheme Plans" Subtitle="Offers on products. Salespeople choose a valid scheme on each order line." IconName="tag" />
+
+    <Alert Kind="error" Message="@error" />
+    <Alert Kind="info" Title="How schemes work">
+        <b>Percent</b>: % off the line amount &middot; <b>Flat</b>: NPR off the line amount &middot;
+        <b>Free quantity</b>: free base units. The minimum quantity is in base units.
+    </Alert>
+
+    <MasterList TItem="Scheme" Title="All schemes" ItemName="scheme" ItemNamePlural="schemes" IconName="tag"
+                ApiPath="api/masters/schemes"
+                SearchText='@(s => $"{s.Name} {ProductName(s.ProductId)} {s.Description}")'
+                Sort="@(l => l.OrderByDescending(s => s.EndDate).ThenBy(s => s.Name))"
+                NewItem="@(() => new Scheme { Type = SchemeTypes.Percent, StartDate = Fmt.Today(), EndDate = Fmt.Today().AddMonths(1), IsActive = true })">
+        <HeaderCells>
+            <th>Scheme</th>
+            <th>Product</th>
+            <th>Type</th>
+            <th class="num">Value</th>
+            <th class="num">Min qty</th>
+            <th>Valid</th>
+        </HeaderCells>
+        <RowCells Context="s">
+            <td>
+                <div class="cell-title">@s.Name</div>
+                @if (!string.IsNullOrWhiteSpace(s.Description))
+                {
+                    <div class="cell-sub">@s.Description</div>
+                }
+            </td>
+            <td>@ProductName(s.ProductId)</td>
+            <td><span class="badge badge-info no-dot">@SchemeTypes.Label(s.Type)</span></td>
+            <td class="num">@ValueText(s)</td>
+            <td class="num">@Fmt.Qty(s.MinQty)</td>
+            <td class="nowrap">
+                @Fmt.Date(s.StartDate) &rarr; @Fmt.Date(s.EndDate)
+                @if (s.EndDate < Fmt.Today())
+                {
+                    <div><span class="badge badge-muted">Expired</span></div>
+                }
+            </td>
+        </RowCells>
+        <FormFields Context="s">
+            <label class="field full">
+                <span class="field-label req">Scheme name</span>
+                <InputText @bind-Value="s.Name" placeholder="e.g. Dashain 5% off" />
+                <ValidationMessage For="() => s.Name" />
+            </label>
+            <label class="field full">
+                <span class="field-label">Description</span>
+                <InputTextArea @bind-Value="s.Description" rows="2" />
+            </label>
+            <label class="field full">
+                <span class="field-label req">Product</span>
+                <InputSelect @bind-Value="s.ProductId">
+                    <option value="">Select product</option>
+                    @foreach (var p in products.Where(x => x.IsActive || x.Id == s.ProductId))
+                    {
+                        <option value="@p.Id">@p.Code - @p.Name</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="() => s.ProductId" />
+            </label>
+            <label class="field">
+                <span class="field-label req">Scheme type</span>
+                <InputSelect @bind-Value="s.Type">
+                    @foreach (var t in SchemeTypes.All)
+                    {
+                        <option value="@t">@SchemeTypes.Label(t)</option>
+                    }
+                </InputSelect>
+            </label>
+            <label class="field">
+                <span class="field-label req">@ValueLabel(s.Type)</span>
+                <InputNumber @bind-Value="s.Value" step="any" />
+                <ValidationMessage For="() => s.Value" />
+            </label>
+            <label class="field">
+                <span class="field-label">Minimum quantity (base units)</span>
+                <InputNumber @bind-Value="s.MinQty" step="any" />
+                <span class="hint">Use 0 for no minimum.</span>
+            </label>
+            <span></span>
+            <label class="field">
+                <span class="field-label req">Start date</span>
+                <InputDate @bind-Value="s.StartDate" />
+            </label>
+            <label class="field">
+                <span class="field-label req">End date</span>
+                <InputDate @bind-Value="s.EndDate" />
+            </label>
+        </FormFields>
+    </MasterList>
+</RoleGuard>
+
+@code {
+    private List<Product> products = new();
+    private string? error;
+
+    private string ProductName(string id) => products.FirstOrDefault(p => p.Id == id)?.Name ?? "";
+
+    private static string ValueLabel(string type) => type switch
+    {
+        SchemeTypes.Percent => "Discount %",
+        SchemeTypes.Flat => "Discount amount (NPR)",
+        _ => "Free quantity (base units)"
+    };
+
+    private static string ValueText(Scheme s) => s.Type switch
+    {
+        SchemeTypes.Percent => Fmt.Qty(s.Value) + "%",
+        SchemeTypes.Flat => "NPR " + Fmt.Money(s.Value),
+        _ => Fmt.Qty(s.Value) + " free"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin)) return;
+        try
+        {
+            products = await Api.GetAsync<List<Product>>("api/masters/products");
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+    }
+}

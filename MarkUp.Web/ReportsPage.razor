@@ -1,0 +1,323 @@
+@page "/reports"
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject Browser Browser
+@inject ToastService Toast
+
+<PageTitle>Reports - MARK_UP</PageTitle>
+
+<RoleGuard>
+    <PageHeader Title="Reports" Subtitle='@(IsSales ? "Your own visits, orders and targets." : "Sales, targets, parties and products for the whole team.")' IconName="chart" />
+
+    <div class="card">
+        <div class="card-header">
+            <h3><Icon Name="filter" /> Choose a report</h3>
+        </div>
+        <div class="card-body">
+            <div class="form-grid cols-3">
+                <label class="field">
+                    <span class="field-label req">Report</span>
+                    <select @bind="kind" @bind:after="OnKindChanged">
+                        <option value="@ReportKinds.Dsr">Daily DSR</option>
+                        <option value="@ReportKinds.TargetVsAch">Target vs Achievement</option>
+                        <option value="@ReportKinds.ProductTarget">Product Target vs Achievement</option>
+                        <option value="@ReportKinds.PartyList">Party Name List</option>
+                        <option value="@ReportKinds.Products">Product Report</option>
+                    </select>
+                    <span class="hint">@KindHint</span>
+                </label>
+
+                @if (NeedsDate)
+                {
+                    <label class="field">
+                        <span class="field-label req">Report date</span>
+                        <input type="date" @bind="date" />
+                    </label>
+                }
+
+                @if (kind == ReportKinds.TargetVsAch || kind == ReportKinds.ProductTarget)
+                {
+                    <label class="field">
+                        <span class="field-label req">View</span>
+                        <select @bind="view">
+                            <option value="@TargetViews.Daily">Daily</option>
+                            <option value="@TargetViews.Mtd">MTD (month to date)</option>
+                            <option value="@TargetViews.Monthly">Monthly</option>
+                            @if (kind == ReportKinds.TargetVsAch)
+                            {
+                                <option value="@TargetViews.Overall">Overall</option>
+                            }
+                        </select>
+                    </label>
+                }
+
+                @if (!IsSales && kind != ReportKinds.Products && lookups != null)
+                {
+                    <label class="field">
+                        <span class="field-label">Salesperson</span>
+                        <select @bind="userId">
+                            <option value="">All salespeople</option>
+                            @foreach (var u in lookups.SalesUsers)
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                }
+
+                @if (kind == ReportKinds.PartyList && lookups != null)
+                {
+                    if (!IsSales)
+                    {
+                        <label class="field">
+                            <span class="field-label">Dealer</span>
+                            <select @bind="dealerId">
+                                <option value="">All dealers</option>
+                                @foreach (var d in lookups.Dealers)
+                                {
+                                    <option value="@d.Id">@d.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    <label class="field">
+                        <span class="field-label">Beat</span>
+                        <select @bind="beatId">
+                            <option value="">All beats</option>
+                            @foreach (var b in lookups.Beats)
+                            {
+                                <option value="@b.Id">@b.Name</option>
+                            }
+                        </select>
+                    </label>
+                }
+            </div>
+        </div>
+        <div class="card-footer">
+            <button class="btn btn-primary" disabled="@(busy != null)" @onclick="RunAsync">
+                @if (busy == "show")
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="eye" />
+                }
+                <span>Show report</span>
+            </button>
+            <button class="btn" disabled="@(busy != null)" @onclick='() => ExportAsync("xlsx")'>
+                @if (busy == "xlsx")
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="sheet" />
+                }
+                <span>Excel</span>
+            </button>
+            <button class="btn" disabled="@(busy != null)" @onclick='() => ExportAsync("pdf")'>
+                @if (busy == "pdf")
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="file-text" />
+                }
+                <span>PDF</span>
+            </button>
+            @if (IsSales)
+            {
+                <span class="muted small" style="margin-left:auto">You see your own data only.</span>
+            }
+        </div>
+    </div>
+
+    <Alert Kind="error" Message="@error" />
+
+    @if (table != null)
+    {
+        <div class="card">
+            <div class="card-header">
+                <h2><Icon Name="file-text" /> @table.Title</h2>
+                <span class="count">@table.Rows.Count row(s)</span>
+            </div>
+            @if (table.Header.Count > 0)
+            {
+                <div class="card-body" style="padding-bottom:0">
+                    <div class="report-meta">
+                        @foreach (var h in table.Header)
+                        {
+                            <div class='meta-chip @(IsHighlight(h.Label) ? "highlight" : "")'><span>@h.Label</span><b>@h.Value</b></div>
+                        }
+                    </div>
+                </div>
+            }
+            @if (table.Rows.Count == 0)
+            {
+                <EmptyState IconName="file-text" Title="No records" Text="Nothing matches these filters. Try another date or salesperson." />
+            }
+            else
+            {
+                <div class="table-wrap mt-2">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                @for (var c = 0; c < table.Columns.Count; c++)
+                                {
+                                    <th class='@(table.NumericColumns.Contains(c) ? "num" : "")'>@table.Columns[c]</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in table.Rows)
+                            {
+                                <tr>
+                                    @for (var c = 0; c < table.Columns.Count; c++)
+                                    {
+                                        var value = c < row.Count ? row[c] : "";
+                                        var column = table.Columns[c];
+                                        <td class='@(table.NumericColumns.Contains(c) ? "num" : "")'>
+                                            @if (column == "Productivity")
+                                            {
+                                                <span class='badge @(value == "Yes" ? "badge-success" : "badge-danger")'>@value</span>
+                                            }
+                                            else
+                                            {
+                                                @value
+                                            }
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            @if (table.Footer.Count > 0)
+            {
+                <div class="card-footer">
+                    <div class="report-meta">
+                        @foreach (var f in table.Footer)
+                        {
+                            <div class="meta-chip"><span>@f.Label</span><b>@f.Value</b></div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    else if (busy == null && string.IsNullOrEmpty(error))
+    {
+        <div class="card">
+            <EmptyState IconName="chart" Title="Pick a report and tap Show report" Text="You can also download it as an Excel or PDF file." />
+        </div>
+    }
+</RoleGuard>
+
+@code {
+    private string kind = ReportKinds.Dsr;
+    private DateOnly date = Fmt.Today();
+    private string view = TargetViews.Daily;
+    private string userId = "";
+    private string dealerId = "";
+    private string beatId = "";
+    private LookupsResponse? lookups;
+    private ReportTable? table;
+    private string? error;
+    private string? busy;
+
+    private bool IsSales => Auth.Role == Roles.Sales;
+    private bool NeedsDate => kind is ReportKinds.Dsr or ReportKinds.TargetVsAch or ReportKinds.ProductTarget;
+
+    private string KindHint => kind switch
+    {
+        ReportKinds.Dsr => "Every visit of the day, with products and productivity.",
+        ReportKinds.TargetVsAch => "Target, billed achievement and remarks.",
+        ReportKinds.ProductTarget => "Target and billed quantity per product.",
+        ReportKinds.PartyList => "All active parties with contact details.",
+        ReportKinds.Products => "All active products with rates.",
+        _ => ""
+    };
+
+    private static bool IsHighlight(string label) =>
+        label.Contains("Target", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("Achievement", StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsLoggedIn || Auth.MustChangePassword) return;
+        try
+        {
+            lookups = await Api.GetAsync<LookupsResponse>("api/lookups");
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+    }
+
+    private void OnKindChanged()
+    {
+        table = null;
+        error = null;
+        if (kind == ReportKinds.ProductTarget && view == TargetViews.Overall) view = TargetViews.Monthly;
+    }
+
+    private string BuildUrl(string? format)
+    {
+        var q = new List<string>
+        {
+            "date=" + Fmt.Date(date),
+            "view=" + Uri.EscapeDataString(view)
+        };
+        if (!IsSales && !string.IsNullOrEmpty(userId)) q.Add("userId=" + Uri.EscapeDataString(userId));
+        if (kind == ReportKinds.PartyList)
+        {
+            if (!string.IsNullOrEmpty(dealerId)) q.Add("dealerId=" + Uri.EscapeDataString(dealerId));
+            if (!string.IsNullOrEmpty(beatId)) q.Add("beatId=" + Uri.EscapeDataString(beatId));
+        }
+        if (!string.IsNullOrEmpty(format)) q.Add("format=" + format);
+        return $"api/reports/{kind}?" + string.Join("&", q);
+    }
+
+    private async Task RunAsync()
+    {
+        busy = "show";
+        error = null;
+        try
+        {
+            table = await Api.GetAsync<ReportTable>(BuildUrl(null));
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+            table = null;
+        }
+        finally
+        {
+            busy = null;
+        }
+    }
+
+    private async Task ExportAsync(string format)
+    {
+        busy = format;
+        error = null;
+        try
+        {
+            var file = await Api.DownloadAsync(BuildUrl(format), $"{kind}-{Fmt.Date(date)}.{format}");
+            await Browser.DownloadAsync(file.FileName, file.ContentType, file.Data);
+            Toast.Success($"{file.FileName} downloaded.", format == "pdf" ? "PDF ready" : "Excel ready");
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Download failed");
+        }
+        finally
+        {
+            busy = null;
+        }
+    }
+}
