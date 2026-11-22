@@ -1,4 +1,6 @@
 @page "/admin/settings"
+@inject ApiClient Api
+@inject ToastService Toast
 
 <PageTitle>Master Settings - MARK_UP</PageTitle>
 
@@ -9,6 +11,7 @@
         <button class='@(tab == "types" ? "active" : "")' @onclick='() => { tab = "types"; }'><Icon Name="store" Class="sm" /> Party types</button>
         <button class='@(tab == "calendar" ? "active" : "")' @onclick='() => { tab = "calendar"; }'><Icon Name="calendar" Class="sm" /> Weekly off days</button>
         <button class='@(tab == "holidays" ? "active" : "")' @onclick='() => { tab = "holidays"; }'><Icon Name="calendar" Class="sm" /> Holidays</button>
+        <button class='@(tab == "location" ? "active" : "")' @onclick="OpenLocationTabAsync"><Icon Name="map-pin" Class="sm" /> Location check</button>
     </div>
 
     @if (tab == "types")
@@ -101,10 +104,99 @@
             </FormFields>
         </MasterList>
     }
+    else if (tab == "location")
+    {
+    <Alert Kind="info" Title="Salespeople must be at the shop">
+        Visits and orders can only be saved within the radius of the shop's saved GPS location, and new shops can only be added
+        with a GPS reading at least as accurate as set below. A shop without GPS gets its location at its first visit.
+        Set the radius to <b>0</b> to switch the check off.
+    </Alert>
+    <div class="card" style="max-width:620px">
+        <div class="card-header"><h3><Icon Name="map-pin" /> Location check</h3></div>
+        @if (appSettings == null)
+        {
+            <div class="loading"><span class="spinner"></span> Loading...</div>
+        }
+        else
+        {
+            <EditForm Model="appSettings" OnValidSubmit="SaveLocationAsync">
+                <DataAnnotationsValidator />
+                <div class="card-body">
+                    <ValidationSummary />
+                    <div class="form-grid cols-2">
+                        <label class="field">
+                            <span class="field-label req">Allowed distance from the shop (metres)</span>
+                            <InputNumber @bind-Value="appSettings.VisitRadiusM" min="0" max="5000" />
+                            <span class="hint">@(appSettings.VisitRadiusM == 0 ? "0 = check is OFF." : "Recommended: 100 m.")</span>
+                            <ValidationMessage For="() => appSettings.VisitRadiusM" />
+                        </label>
+                        <label class="field">
+                            <span class="field-label req">GPS accuracy needed (metres or better)</span>
+                            <InputNumber @bind-Value="appSettings.MaxGpsAccuracyM" min="10" max="500" />
+                            <span class="hint">Recommended: 50 m. Smaller numbers are stricter and block more often indoors.</span>
+                            <ValidationMessage For="() => appSettings.MaxGpsAccuracyM" />
+                        </label>
+                    </div>
+                </div>
+                <div class="card-footer" style="justify-content:flex-end">
+                    <button type="submit" class="btn btn-primary" disabled="@savingLocation">
+                        @if (savingLocation)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="check" />
+                        }
+                        <span>Save</span>
+                    </button>
+                </div>
+            </EditForm>
+        }
+    </div>
+    <p class="muted small">Salespeople get the new setting the next time Market Visit loads while online.</p>
+    }
 </RoleGuard>
 
 @code {
     private string tab = "types";
+    private AppSettings? appSettings;
+    private bool savingLocation;
+
+    private async Task OpenLocationTabAsync()
+    {
+        tab = "location";
+        if (appSettings != null) return;
+        try
+        {
+            appSettings = await Api.GetAsync<AppSettings>("api/settings/app");
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Could not load settings");
+        }
+    }
+
+    private async Task SaveLocationAsync()
+    {
+        if (appSettings == null) return;
+        savingLocation = true;
+        try
+        {
+            appSettings = await Api.PutAsync<AppSettings>("api/settings/app", appSettings);
+            Toast.Success(appSettings.VisitRadiusM == 0
+                ? "The location check is now off."
+                : $"Visits must be within {appSettings.VisitRadiusM} m of the shop, with GPS accurate to {appSettings.MaxGpsAccuracyM} m.", "Saved");
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Could not save");
+        }
+        finally
+        {
+            savingLocation = false;
+        }
+    }
 
     private static readonly DayOfWeek[] Days =
     {

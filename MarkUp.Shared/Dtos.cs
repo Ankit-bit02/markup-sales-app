@@ -103,6 +103,9 @@ public class SalesBootstrap
     public List<Product> Products { get; set; } = new();
     public List<Scheme> Schemes { get; set; } = new();
     public List<PartyType> PartyTypes { get; set; } = new();
+    /// <summary>Location check from Master Settings (so the phone can check offline too).</summary>
+    public int VisitRadiusM { get; set; } = 100;
+    public int MaxGpsAccuracyM { get; set; } = 50;
     public DateTime LoadedAtUtc { get; set; }
 }
 
@@ -165,6 +168,10 @@ public class VisitRequest
 
     [Range(-180, 180)]
     public double Lng { get; set; }
+
+    /// <summary>GPS accuracy in metres reported by the phone (0 = unknown).</summary>
+    [Range(0, 100000)]
+    public double Accuracy { get; set; }
 
     [StringLength(200)]
     public string NoOrderReason { get; set; } = "";
@@ -483,4 +490,42 @@ public class RouteView
 
     /// <summary>Minutes between consecutive points that are close enough to count as tracked (gaps excluded).</summary>
     public int TrackedMinutes { get; set; }
+}
+
+
+// ---------------------------------------------------------------- New party from the phone
+
+/// <summary>A shop added by a salesperson in the field. Usable at once; the office reviews it later.</summary>
+public class NewPartyRequest
+{
+    /// <summary>Created on the phone, so the shop can be used offline and sending twice is harmless.</summary>
+    [Required, StringLength(64, MinimumLength = 8)]
+    [RegularExpression(@"^[A-Za-z0-9\-]+$")]
+    public string Id { get; set; } = "";
+
+    [Required(ErrorMessage = "Enter the shop name."), StringLength(150, MinimumLength = 2, ErrorMessage = "Shop name must be 2 to 150 characters.")]
+    public string Name { get; set; } = "";
+
+    [Required(ErrorMessage = "Select the party type.")]
+    public string PartyTypeId { get; set; } = "";
+
+    [Required(ErrorMessage = "Select the beat.")]
+    public string BeatId { get; set; } = "";
+
+    [StringLength(80)]
+    public string ContactPerson { get; set; } = "";
+
+    [StringLength(20)]
+    [RegularExpression(@"^[0-9+\-\s]*$", ErrorMessage = "Phone can contain digits, spaces, + and - only.")]
+    public string Phone { get; set; } = "";
+
+    [StringLength(200)]
+    public string Address { get; set; } = "";
+
+    /// <summary>Where the salesperson stood when adding the shop (optional).</summary>
+    public double? Lat { get; set; }
+    public double? Lng { get; set; }
+
+    /// <summary>GPS accuracy in metres reported by the phone (0 = unknown).</summary>
+    public double Accuracy { get; set; }
 }

@@ -59,6 +59,84 @@
             </div>
         }
     </div>
+
+    @* ---------------- New party (shop) ---------------- *@
+    @if (newParty != null && boot != null)
+    {
+        <div class="modal-backdrop">
+            <div class="modal" role="dialog" aria-modal="true">
+                <EditForm Model="newParty" OnValidSubmit="SaveNewPartyAsync">
+                    <DataAnnotationsValidator />
+                    <div class="modal-header">
+                        <h2>New party</h2>
+                        <button type="button" class="btn btn-ghost btn-icon" aria-label="Close" @onclick="CloseNewParty"><Icon Name="x" /></button>
+                    </div>
+                    <div class="modal-body">
+                        <Alert Kind="info" Class="compact">The shop is added to <b>@BeatName(newParty.BeatId)</b> and can be used straight away. The office will check it later.</Alert>
+                        <Alert Kind="error" Message="@partyError" />
+                        @if (dupWarning)
+                        {
+                            <Alert Kind="warning" Class="compact" Title="Same name already on this beat">Check the list first. If it really is a different shop, tap <b>Add anyway</b>.</Alert>
+                        }
+                        <ValidationSummary />
+                        <div class="form-grid cols-2">
+                            <label class="field full">
+                                <span class="field-label req">Shop name</span>
+                                <InputText @bind-Value="newParty.Name" placeholder="e.g. Sagar Kirana Pasal" />
+                                <ValidationMessage For="() => newParty.Name" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label req">Party type</span>
+                                <InputSelect @bind-Value="newParty.PartyTypeId">
+                                    <option value="">Select type</option>
+                                    @foreach (var t in boot.PartyTypes)
+                                    {
+                                        <option value="@t.Id">@t.Name</option>
+                                    }
+                                </InputSelect>
+                                <ValidationMessage For="() => newParty.PartyTypeId" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label">Contact person</span>
+                                <InputText @bind-Value="newParty.ContactPerson" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label">Contact number</span>
+                                <InputText @bind-Value="newParty.Phone" inputmode="tel" placeholder="98XXXXXXXX" />
+                                <ValidationMessage For="() => newParty.Phone" />
+                            </label>
+                            <label class="field">
+                                <span class="field-label">Address</span>
+                                <InputText @bind-Value="newParty.Address" placeholder="Tole / area" />
+                            </label>
+                        </div>
+                        <p class="muted small mt-2 mb-0">
+                            Stand at the shop when adding it: its GPS location is saved from your phone.
+                            @if (boot.VisitRadiusM > 0)
+                            {
+                                <text>Orders for this shop can then only be taken within @boot.VisitRadiusM m of it.</text>
+                            }
+                        </p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn" disabled="@partyBusy" @onclick="CloseNewParty">Cancel</button>
+                        <button type="submit" class="btn btn-primary" disabled="@partyBusy">
+                            @if (partyBusy)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            else
+                            {
+                                <Icon Name="check" />
+                            }
+                            <span>@(dupWarning ? "Add anyway" : "Add party")</span>
+                        </button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    }
+
     @* ---------------- Beat tracking ---------------- *@
     @if (attOk && boot != null && boot.Beats.Count > 0)
     {
@@ -211,13 +289,18 @@
                     </div>
                     <div class="field">
                         <span class="field-label req">Party</span>
-                        <select @bind="partyId" disabled="@(string.IsNullOrEmpty(beatId))">
-                            <option value="">@(string.IsNullOrEmpty(beatId) ? "Select a beat first" : "Select party")</option>
-                            @foreach (var p in PartiesInBeat)
-                            {
-                                <option value="@p.Id">@p.Name</option>
-                            }
-                        </select>
+                        <div class="row" style="flex-wrap:nowrap;gap:8px">
+                            <select @bind="partyId" disabled="@(string.IsNullOrEmpty(beatId))" style="flex:1;min-width:0">
+                                <option value="">@(string.IsNullOrEmpty(beatId) ? "Select a beat first" : "Select party")</option>
+                                @foreach (var p in PartiesInBeat)
+                                {
+                                    <option value="@p.Id">@p.Name@(p.NeedsReview ? " (new)" : "")</option>
+                                }
+                            </select>
+                            <button type="button" class="btn" title="Add a new shop" disabled="@(string.IsNullOrEmpty(beatId))" @onclick="OpenNewParty">
+                                <Icon Name="plus" /> <span>New</span>
+                            </button>
+                        </div>
                     </div>
                     @if (SelectedParty != null)
                     {
@@ -232,6 +315,12 @@
                                 @if (!string.IsNullOrWhiteSpace(SelectedParty.ContactPerson) || !string.IsNullOrWhiteSpace(SelectedParty.Phone))
                                 {
                                     <div class="muted">@SelectedParty.ContactPerson @SelectedParty.Phone</div>
+                                }
+                                @if (boot.VisitRadiusM > 0)
+                                {
+                                    <div class="muted small">
+                                        @(SelectedParty.Lat == null ? "Shop location not saved yet: it is saved with this visit." : $"Save the visit within {boot.VisitRadiusM} m of the shop.")
+                                    </div>
                                 }
                             </div>
                         </div>
@@ -498,6 +587,7 @@
         try
         {
             boot = await Api.GetAsync<SalesBootstrap>("api/sales/bootstrap");
+            await MergeQueuedPartiesAsync();
             await Sync.SaveBootstrapAsync(boot);
             offlineData = false;
         }
@@ -626,6 +716,19 @@
             }
 
             var party = SelectedParty;
+
+            // Location check (Master Settings): must be at the shop. The server checks again.
+            if (party != null)
+            {
+                var problem = Geo.CheckAtShop(geo.Lat, geo.Lng, geo.Accuracy, party.Lat, party.Lng, party.Name,
+                                              boot.VisitRadiusM, boot.MaxGpsAccuracyM);
+                if (problem != null)
+                {
+                    formError = problem;
+                    return;
+                }
+            }
+
             var total = OrderTotal;
             var req = new VisitRequest
             {
@@ -635,6 +738,7 @@
                 PartyId = partyId,
                 Lat = geo.Lat,
                 Lng = geo.Lng,
+                Accuracy = Math.Round(geo.Accuracy),
                 NoOrderReason = lines.Count == 0 ? reason.Trim() : "",
                 Items = lines.Select(l => new OrderLineRequest
                 {
@@ -647,6 +751,14 @@
             var label = $"{party?.Name} - " + (lines.Count > 0 ? $"order NPR {Fmt.Money(total)}" : "no order");
 
             await Sync.EnqueueAsync(OfflineSync.KindVisit, req.Id, req, label);
+
+            // First visit of a shop without GPS: the server saves this location for the shop; keep it on the phone too.
+            if (party != null && (party.Lat == null || party.Lng == null))
+            {
+                party.Lat = Math.Round(geo.Lat, 6);
+                party.Lng = Math.Round(geo.Lng, 6);
+                await Sync.SaveBootstrapAsync(boot);
+            }
 
             lines.Clear();
             reason = "";
@@ -723,6 +835,143 @@
         });
     }
 
+    // ------------------------------------------------------------------ New party (shop)
+
+    private NewPartyRequest? newParty;
+    private bool partyBusy;
+    private bool dupWarning;
+    private string dupName = "";
+    private string? partyError;
+
+    private string BeatName(string id) => boot?.Beats.FirstOrDefault(b => b.Id == id)?.Name ?? "";
+
+    /// <summary>New shops still waiting to be sent are not in the server's list yet: keep them selectable.</summary>
+    private async Task MergeQueuedPartiesAsync()
+    {
+        if (boot == null) return;
+        var opts = new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web);
+        foreach (var q in (await Sync.GetQueueAsync()).Where(q => q.Kind == OfflineSync.KindParty))
+        {
+            var req = System.Text.Json.JsonSerializer.Deserialize<NewPartyRequest>(q.Json, opts);
+            if (req == null || boot.Parties.Any(p => p.Id == req.Id)) continue;
+            boot.Parties.Add(new Party
+            {
+                Id = req.Id,
+                Name = req.Name,
+                PartyTypeId = req.PartyTypeId,
+                BeatId = req.BeatId,
+                ContactPerson = req.ContactPerson,
+                Phone = req.Phone,
+                Address = req.Address,
+                Lat = req.Lat,
+                Lng = req.Lng,
+                AddedByUserId = Auth.UserId,
+                NeedsReview = true,
+                IsActive = true
+            });
+        }
+        boot.Parties = boot.Parties.OrderBy(p => p.Name).ToList();
+    }
+
+    private void OpenNewParty()
+    {
+        if (boot == null || string.IsNullOrEmpty(beatId)) return;
+        dupWarning = false;
+        dupName = "";
+        partyError = null;
+        newParty = new NewPartyRequest
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            BeatId = beatId,
+            PartyTypeId = boot.PartyTypes.Count == 1 ? boot.PartyTypes[0].Id : ""
+        };
+    }
+
+    private void CloseNewParty()
+    {
+        newParty = null;
+        dupWarning = false;
+    }
+
+    private async Task SaveNewPartyAsync()
+    {
+        if (boot == null || newParty == null) return;
+        var name = newParty.Name.Trim();
+        var duplicate = boot.Parties.Any(p => p.BeatId == newParty.BeatId && string.Equals(p.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
+        if (duplicate && !string.Equals(dupName, name, StringComparison.OrdinalIgnoreCase))
+        {
+            // First attempt with this name: warn; a second tap on "Add anyway" saves it.
+            dupWarning = true;
+            dupName = name;
+            return;
+        }
+
+        partyBusy = true;
+        partyError = null;
+        try
+        {
+            // GPS: required while the location check is on (Master Settings), otherwise optional.
+            var geo = await Browser.GetLocationAsync();
+            if (boot.VisitRadiusM > 0)
+            {
+                // Location check on: the shop is saved where you stand, so a good GPS fix is required.
+                if (!geo.Ok)
+                {
+                    partyError = (geo.Error ?? "Could not get your location.") + " Turn on location (GPS), stand at the shop and try again.";
+                    return;
+                }
+                if (geo.Accuracy > boot.MaxGpsAccuracyM)
+                {
+                    partyError = $"Your GPS is not accurate enough (about {geo.Accuracy:0} m; {boot.MaxGpsAccuracyM} m or better is needed). Step outside near the shop, wait a few seconds and try again.";
+                    return;
+                }
+            }
+            if (geo.Ok)
+            {
+                newParty.Lat = geo.Lat;
+                newParty.Lng = geo.Lng;
+                newParty.Accuracy = Math.Round(geo.Accuracy);
+            }
+            newParty.Name = name;
+
+            // Saved on the phone first (works offline); sent before the visit that uses it.
+            await Sync.EnqueueAsync(OfflineSync.KindParty, newParty.Id, newParty, $"New shop: {name}");
+
+            var party = new Party
+            {
+                Id = newParty.Id,
+                Name = name,
+                PartyTypeId = newParty.PartyTypeId,
+                BeatId = newParty.BeatId,
+                ContactPerson = newParty.ContactPerson.Trim(),
+                Phone = newParty.Phone.Trim(),
+                Address = newParty.Address.Trim(),
+                Lat = newParty.Lat,
+                Lng = newParty.Lng,
+                AddedByUserId = Auth.UserId,
+                NeedsReview = true,
+                IsActive = true
+            };
+            boot.Parties.Add(party);
+            boot.Parties = boot.Parties.OrderBy(p => p.Name).ToList();
+            await Sync.SaveBootstrapAsync(boot);
+
+            partyId = party.Id;
+            newParty = null;
+            dupWarning = false;
+            Toast.Success($"{name} is added and selected for this visit.", "Shop added");
+            _ = SyncNowAsync();
+        }
+        catch (Exception ex)
+        {
+            Toast.Error(ex.Message, "Could not add the shop");
+        }
+        finally
+        {
+            partyBusy = false;
+        }
+    }
+
     // ------------------------------------------------------------------ Beat tracking
 
     private bool trackBusy;
@@ -776,5 +1025,4 @@
         Sync.Changed -= OnSyncChanged;
         Tracking.Changed -= OnTrackingChanged;
     }
-}
 }

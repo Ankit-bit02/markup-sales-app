@@ -24,6 +24,7 @@ public sealed class OfflineSync
 {
     public const string KindAttendance = "attendance";
     public const string KindVisit = "visit";
+    public const string KindParty = "party";
     private const int MaxResults = 30;
 
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
@@ -137,6 +138,12 @@ public sealed class OfflineSync
                         var req = JsonSerializer.Deserialize<AttendanceRequest>(record.Json, JsonOpts)!;
                         var res = await _api.PostAsync<AttendanceResult>("api/sales/attendance", req);
                         await _browser.SetItemAsync(AttendanceKey, res.Date.ToString("yyyy-MM-dd"));
+                    }
+                    else if (record.Kind == KindParty)
+                    {
+                        // Queued before the visits that use it, so the shop always exists first.
+                        var req = JsonSerializer.Deserialize<NewPartyRequest>(record.Json, JsonOpts)!;
+                        await _api.PostAsync<Party>("api/sales/parties", req);
                     }
                     else if (record.Kind == KindVisit)
                     {

@@ -74,6 +74,10 @@
                                 }
                             </td>
                             <td class="actions-cell">
+                                @if (RowActions != null)
+                                {
+                                    @RowActions(item)
+                                }
                                 <button class="btn btn-sm" title="Edit" @onclick="() => Edit(item)"><Icon Name="pencil" Class="sm" /> Edit</button>
                                 @if (item.IsActive)
                                 {
@@ -144,6 +148,8 @@
     [Parameter] public Func<TItem, string>? SearchText { get; set; }
     [Parameter] public Func<TItem>? NewItem { get; set; }
     [Parameter] public Func<IEnumerable<TItem>, IEnumerable<TItem>>? Sort { get; set; }
+    /// <summary>Optional extra buttons shown before Edit on each row.</summary>
+    [Parameter] public RenderFragment<TItem>? RowActions { get; set; }
 
     /// <summary>Optional extra filter set by the page (e.g. brand chips).</summary>
     [Parameter] public Func<TItem, bool>? Filter { get; set; }

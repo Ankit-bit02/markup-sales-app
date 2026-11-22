@@ -1,6 +1,7 @@
 @page "/admin/parties"
 @inject ApiClient Api
 @inject AuthSession Auth
+@inject ToastService Toast
 
 <PageTitle>Parties - MARK_UP</PageTitle>
 
@@ -17,8 +18,21 @@
         <Alert Kind="warning" Title="Add a beat first">Every party belongs to a beat. <a href="admin/beats">Go to Beats</a>.</Alert>
     }
 
-    <MasterList TItem="Party" Title="All parties" ItemName="party" ItemNamePlural="parties" IconName="store"
+    @if (ReviewCount > 0)
+    {
+        <Alert Kind="info" Title='@($"{ReviewCount} new shop(s) added by salespeople")'>
+            Check the name, type, contact and location, edit if needed, then click <b>Mark as checked</b>. Deactivate duplicates.
+        </Alert>
+    }
+    <div class="import-filters">
+        <button type="button" class='chip @(reviewOnly ? "" : "active")' @onclick="() => { reviewOnly = false; }">All parties <b>@parties.Count(p => p.IsActive)</b></button>
+        <button type="button" class='chip chip-info @(reviewOnly ? "active" : "")' @onclick="() => { reviewOnly = true; }">Needs review <b>@ReviewCount</b></button>
+    </div>
+
+    <MasterList @ref="list" TItem="Party" Title='@(reviewOnly ? "Shops to review" : "All parties")' ItemName="party" ItemNamePlural="parties" IconName="store"
                 ApiPath="api/masters/parties"
+                Filter="@(p => !reviewOnly || p.NeedsReview)"
+                OnLoaded="OnPartiesLoaded"
                 SearchText='@(p => $"{p.Name} {p.ContactPerson} {p.Phone} {p.Address} {BeatName(p.BeatId)}")'
                 Sort="@(l => l.OrderBy(p => BeatName(p.BeatId)).ThenBy(p => p.Name))">
         <HeaderCells>
@@ -30,7 +44,19 @@
             <th>GPS</th>
         </HeaderCells>
         <RowCells Context="p">
-            <td class="cell-title">@p.Name</td>
+            <td>
+                <div class="cell-title">
+                    @p.Name
+                    @if (p.NeedsReview)
+                    {
+                        <span class="badge badge-info no-dot">New</span>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(p.AddedByUserId))
+                {
+                    <div class="cell-sub">Added by @UserName(p.AddedByUserId)@(p.AddedAt is { } at ? " · " + at.ToString("yyyy-MM-dd HH:mm") : "")</div>
+                }
+            </td>
             <td>@BeatName(p.BeatId)</td>
             <td><span class="badge badge-info no-dot">@TypeName(p.PartyTypeId)</span></td>
             <td>
@@ -52,6 +78,22 @@
                 }
             </td>
         </RowCells>
+        <RowActions Context="p">
+            @if (p.NeedsReview)
+            {
+                <button class="btn btn-sm btn-success" title="The shop details are correct" disabled="@(checkingId == p.Id)" @onclick="() => MarkCheckedAsync(p)">
+                    @if (checkingId == p.Id)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="check" Class="sm" />
+                    }
+                    <span>Mark as checked</span>
+                </button>
+            }
+        </RowActions>
         <FormFields Context="p">
             <label class="field full">
                 <span class="field-label req">Party name</span>
@@ -104,6 +146,10 @@
                 <InputNumber @bind-Value="p.Lng" step="any" placeholder="e.g. 85.323961" />
                 <ValidationMessage For="() => p.Lng" />
             </label>
+            @if (!string.IsNullOrEmpty(p.AddedByUserId))
+            {
+                <label class="check full"><InputCheckbox @bind-Value="p.NeedsReview" /> Needs review (added by @UserName(p.AddedByUserId))</label>
+            }
             <span class="hint full">
                 Filled automatically at the shop's first visit. To correct it: in Google Maps, long-press the shop,
                 copy the two numbers shown (latitude, longitude) and paste them here. Leave both empty to capture it again at the next visit.
@@ -115,6 +161,38 @@
 @code {
     private List<Beat> beats = new();
     private List<PartyType> partyTypes = new();
+    private List<UserDto> users = new();
+    private List<Party> parties = new();
+    private MasterList<Party>? list;
+    private bool reviewOnly;
+    private string? checkingId;
+
+    private int ReviewCount => parties.Count(p => p.IsActive && p.NeedsReview);
+    private string UserName(string id) => users.FirstOrDefault(u => u.Id == id)?.Name ?? "a salesperson";
+
+    private void OnPartiesLoaded(List<Party> loaded) => parties = loaded;
+
+    private async Task MarkCheckedAsync(Party p)
+    {
+        checkingId = p.Id;
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(p);
+            var copy = System.Text.Json.JsonSerializer.Deserialize<Party>(json)!;
+            copy.NeedsReview = false;
+            await Api.PutAsync<Party>($"api/masters/parties/{Uri.EscapeDataString(p.Id)}", copy);
+            Toast.Success($"{p.Name} is marked as checked.");
+            if (list != null) await list.LoadAsync();
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Could not update");
+        }
+        finally
+        {
+            checkingId = null;
+        }
+    }
     private string? error;
     private bool loaded;
 
@@ -128,6 +206,7 @@
         {
             beats = await Api.GetAsync<List<Beat>>("api/masters/beats");
             partyTypes = await Api.GetAsync<List<PartyType>>("api/masters/party-types");
+            users = await Api.GetAsync<List<UserDto>>("api/users");
             loaded = true;
         }
         catch (ApiException ex)

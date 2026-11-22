@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using MarkUp.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -36,6 +37,7 @@ public sealed class SalesService
         var beats = m.Beats.Values.Where(b => b.IsActive && b.AssignedUserId == userId).OrderBy(b => b.Name).ToList();
         var beatIds = beats.Select(b => b.Id).ToHashSet();
         var parties = m.Parties.Values.Where(p => p.IsActive && beatIds.Contains(p.BeatId)).OrderBy(p => p.Name).ToList();
+        var appSettings = await AppSettingsAsync();
         var brands = (await _store.GetAllAsync<Brand>()).Where(b => b.IsActive).OrderBy(b => b.Name).ToList();
         var inactiveBrandIds = (await _store.GetAllAsync<Brand>()).Where(b => !b.IsActive).Select(b => b.Id).ToHashSet();
         var products = m.Products.Values
@@ -62,6 +64,8 @@ public sealed class SalesService
             Beats = beats,
             Parties = parties,
             Brands = brands,
+            VisitRadiusM = appSettings.VisitRadiusM,
+            MaxGpsAccuracyM = appSettings.MaxGpsAccuracyM,
             Products = products,
             Schemes = schemes,
             PartyTypes = partyTypes,
@@ -107,8 +111,11 @@ public sealed class SalesService
                 if (existing.UserId != userId) throw AppException.Conflict("Record id already used.");
                 return new AttendanceResult
                 {
-                    Id = existing.Id, Date = existing.Date, LoginTime = existing.LoginTime,
-                    LocationName = existing.LocationName, AlreadyMarked = true
+                    Id = existing.Id,
+                    Date = existing.Date,
+                    LoginTime = existing.LoginTime,
+                    LocationName = existing.LocationName,
+                    AlreadyMarked = true
                 };
             }
 
@@ -129,6 +136,68 @@ public sealed class SalesService
         });
     }
 
+    /// <summary>
+    /// A shop added by the salesperson. It is active at once (so the order can be taken) and marked
+    /// NeedsReview so the office can check it. The Id comes from the phone: sending again returns the same shop.
+    /// </summary>
+    public async Task<Party> AddPartyAsync(string userId, NewPartyRequest req)
+    {
+        Party? result = null;
+        await _store.WriteLockedAsync(async () =>
+        {
+            var existing = await _store.FindAsync<Party>(req.Id);
+            if (existing != null)
+            {
+                if (existing.AddedByUserId != userId) throw AppException.Conflict("This shop id is already used.");
+                result = existing;
+                return;
+            }
+
+            var beat = await _store.FindAsync<Beat>(req.BeatId);
+            if (beat == null || !beat.IsActive || beat.AssignedUserId != userId)
+                throw AppException.BadRequest("This beat is not assigned to you.");
+
+            var type = await _store.FindAsync<PartyType>(req.PartyTypeId);
+            if (type == null || !type.IsActive) throw AppException.BadRequest("Select a valid party type.");
+
+            double? lat = req.Lat, lng = req.Lng;
+            var gpsOk = lat is >= -90 and <= 90 && lng is >= -180 and <= 180 && !(lat == 0 && lng == 0);
+
+            // Location check on: the shop's location is where the salesperson stands, so it must be a good GPS fix.
+            var settings = await AppSettingsAsync();
+            if (settings.VisitRadiusM > 0)
+            {
+                if (!gpsOk || req.Accuracy <= 0)
+                    throw AppException.BadRequest("Your location is needed to add a shop. Turn on location (GPS), stand at the shop and try again.");
+                if (req.Accuracy > settings.MaxGpsAccuracyM)
+                    throw AppException.BadRequest($"Your GPS is not accurate enough (about {req.Accuracy:0} m; {settings.MaxGpsAccuracyM} m or better is needed). Step outside near the shop, wait a few seconds and try again.");
+            }
+
+            var party = new Party
+            {
+                Id = req.Id.Trim(),
+                Name = Regex.Replace(req.Name.Trim(), @"\s+", " "),
+                PartyTypeId = type.Id,
+                BeatId = beat.Id,
+                ContactPerson = req.ContactPerson.Trim(),
+                Phone = req.Phone.Trim(),
+                Address = req.Address.Trim(),
+                Lat = gpsOk ? Math.Round(lat!.Value, 6) : null,
+                Lng = gpsOk ? Math.Round(lng!.Value, 6) : null,
+                AddedByUserId = userId,
+                AddedAt = _clock.Now,
+                NeedsReview = true,
+                IsActive = true
+            };
+            await _store.AddAsync(party);
+            result = party;
+        });
+        return result!;
+    }
+
+    private async Task<AppSettings> AppSettingsAsync() =>
+        await _store.FindAsync<AppSettings>(AppSettings.MainId) ?? new AppSettings();
+
     public async Task<VisitResult> SaveVisitAsync(string userId, VisitRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Id)) throw AppException.BadRequest("Missing record id.");
@@ -145,6 +214,12 @@ public sealed class SalesService
         if (!m.Parties.TryGetValue(req.PartyId, out var party) || party.BeatId != beat.Id)
             throw AppException.BadRequest("This party does not belong to the selected beat.");
         if (!party.IsActive) throw AppException.BadRequest($"Party \"{party.Name}\" is inactive.");
+
+        // Location check (Master Settings): the salesperson must be at the shop.
+        var settings = await AppSettingsAsync();
+        var problem = Geo.CheckAtShop(req.Lat, req.Lng, req.Accuracy, party.Lat, party.Lng, party.Name,
+                                      settings.VisitRadiusM, settings.MaxGpsAccuracyM);
+        if (problem != null) throw AppException.BadRequest(problem);
 
         var reason = (req.NoOrderReason ?? "").Trim();
         var productive = items.Count > 0;
@@ -257,7 +332,10 @@ public sealed class SalesService
                 LocationName = location,
                 IsProductive = productive,
                 NoOrderReason = productive ? "" : reason,
-                SyncedAt = _clock.Now
+                SyncedAt = _clock.Now,
+                DistanceM = party.Lat is { } pLat && party.Lng is { } pLng
+                    ? (int)Math.Round(Geo.DistanceM(req.Lat, req.Lng, pLat, pLng)) : null,
+                GpsAccuracyM = req.Accuracy > 0 ? (int)Math.Round(req.Accuracy) : null
             };
             await _store.AddAsync(visit);
 
@@ -357,4 +435,9 @@ public sealed class SalesController : ControllerBase
     [HttpPost("visits")]
     public async Task<ActionResult<VisitResult>> Visit([FromBody] VisitRequest req) =>
         Ok(await _sales.SaveVisitAsync(User.UserId(), req));
+
+    /// <summary>Salesperson adds a new shop on one of their own beats.</summary>
+    [HttpPost("parties")]
+    public async Task<ActionResult<Party>> AddParty([FromBody] NewPartyRequest req) =>
+        Ok(await _sales.AddPartyAsync(User.UserId(), req));
 }

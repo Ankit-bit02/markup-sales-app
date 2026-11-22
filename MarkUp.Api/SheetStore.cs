@@ -34,6 +34,7 @@ public static class TableRegistry
         [typeof(Order)] = "Orders",
         [typeof(OrderItem)] = "OrderItems",
         [typeof(UserProfileRecord)] = "Profiles",
+        [typeof(AppSettings)] = "AppSettings",
     };
 
     public static IReadOnlyDictionary<Type, string> All => Tabs;

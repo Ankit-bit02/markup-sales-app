@@ -121,6 +121,16 @@ public class Party : IEntity, IActivatable
     [Range(-180, 180, ErrorMessage = "Longitude must be between -180 and 180.")]
     public double? Lng { get; set; }
 
+
+    /// <summary>Salesperson who added the shop from the phone. Empty = added by the office.</summary>
+    [StringLength(40)]
+    public string AddedByUserId { get; set; } = "";
+
+    public DateTime? AddedAt { get; set; }
+
+    /// <summary>True for shops added by a salesperson until an administrator marks them as checked.</summary>
+    public bool NeedsReview { get; set; }
+
     public bool IsActive { get; set; } = true;
 }
 
@@ -290,6 +300,30 @@ public class Visit : IEntity
     public bool IsProductive { get; set; }
     public string NoOrderReason { get; set; } = "";
     public DateTime SyncedAt { get; set; }
+
+    /// <summary>Distance in metres from the shop's saved GPS when the visit was saved (empty = shop had no GPS yet).</summary>
+    public int? DistanceM { get; set; }
+
+    /// <summary>GPS accuracy in metres reported by the phone (empty = not reported).</summary>
+    public int? GpsAccuracyM { get; set; }
+}
+
+
+
+/// <summary>App-wide settings (one row, Id = "main"), edited in Master Settings.</summary>
+public class AppSettings : IEntity
+{
+    public const string MainId = "main";
+
+    public string Id { get; set; } = MainId;
+
+    /// <summary>Visits and new shops are only allowed within this distance of the shop. 0 = check off.</summary>
+    [Range(0, 5000, ErrorMessage = "The radius must be between 0 and 5,000 metres.")]
+    public int VisitRadiusM { get; set; } = 100;
+
+    /// <summary>The phone's GPS reading must be at least this accurate (metres).</summary>
+    [Range(10, 500, ErrorMessage = "GPS accuracy must be between 10 and 500 metres.")]
+    public int MaxGpsAccuracyM { get; set; } = 50;
 }
 
 public class Order : IEntity

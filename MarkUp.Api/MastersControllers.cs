@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using MarkUp.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -293,5 +293,36 @@ public sealed class ProductTargetsController : MasterControllerBase<ProductTarge
         if (item.IsActive && all.Any(x => x.Id != item.Id && x.IsActive && x.UserId == item.UserId
                 && x.Year == item.Year && x.Month == item.Month && x.ProductId == item.ProductId))
             throw AppException.Conflict($"{user.Name} already has a target for {product.Name} in {item.Month}/{item.Year}. Edit that record instead.");
+    }
+}
+
+
+
+/// <summary>App-wide settings (Master Settings → Location check).</summary>
+[ApiController]
+[Route("api/settings/app")]
+[Authorize]
+public sealed class AppSettingsController : ControllerBase
+{
+    private readonly SheetStore _store;
+
+    public AppSettingsController(SheetStore store) => _store = store;
+
+    [HttpGet]
+    public async Task<ActionResult<AppSettings>> Get() =>
+        Ok(await _store.FindAsync<AppSettings>(AppSettings.MainId) ?? new AppSettings());
+
+    [HttpPut]
+    [Authorize(Roles = Roles.Admin)]
+    public async Task<ActionResult<AppSettings>> Save([FromBody] AppSettings req)
+    {
+        req.Id = AppSettings.MainId;
+        await _store.WriteLockedAsync(async () =>
+        {
+            var existing = await _store.FindAsync<AppSettings>(AppSettings.MainId);
+            if (existing == null) await _store.AddAsync(req);
+            else await _store.UpdateAsync(req);
+        });
+        return Ok(req);
     }
 }
