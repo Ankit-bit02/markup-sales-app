@@ -211,6 +211,9 @@ public sealed class SheetStore
     /// <summary>Creates missing tabs and header columns. Safe to run on every start.</summary>
     public async Task EnsureSchemaAsync(CancellationToken ct = default)
     {
+        // Few round trips on purpose: this runs on every start (and Render's free plan restarts often).
+        // 1) spreadsheet info, 2) all header rows in one batch read, 3) one batch write for missing
+        // columns (only if needed), 4) one batch format/protect update (only if needed).
         var spreadsheet = await _service.Spreadsheets.Get(_spreadsheetId).ExecuteAsync(ct);
         var existing = spreadsheet.Sheets?.ToDictionary(s => s.Properties.Title, s => s, StringComparer.Ordinal)
                        ?? new Dictionary<string, Sheet>();
@@ -229,29 +232,48 @@ public sealed class SheetStore
             existing = spreadsheet.Sheets.ToDictionary(s => s.Properties.Title, s => s, StringComparer.Ordinal);
         }
 
+        // All header rows in a single request.
+        var tabs = TableRegistry.All.ToList();
+        var batchGet = _service.Spreadsheets.Values.BatchGet(_spreadsheetId);
+        batchGet.Ranges = tabs.Select(t => $"'{t.Value}'!1:1").ToList();
+        var headers = await batchGet.ExecuteAsync(ct);
+
+        var headerWrites = new List<ValueRange>();
         var formatRequests = new List<Request>();
-        foreach (var (type, tab) in TableRegistry.All)
+        for (var i = 0; i < tabs.Count; i++)
         {
+            var (type, tab) = tabs[i];
             var wanted = TableRegistry.Columns(type);
-            var headerReq = _service.Spreadsheets.Values.Get(_spreadsheetId, $"'{tab}'!1:1");
-            var headerResp = await headerReq.ExecuteAsync(ct);
-            var current = headerResp.Values?.FirstOrDefault()?.Select(v => Convert.ToString(v, CultureInfo.InvariantCulture) ?? "").ToList()
+            var values = headers.ValueRanges != null && i < headers.ValueRanges.Count ? headers.ValueRanges[i].Values : null;
+            var current = values?.FirstOrDefault()?.Select(v => Convert.ToString(v, CultureInfo.InvariantCulture) ?? "").ToList()
                           ?? new List<string>();
 
             var missing = wanted.Where(c => !current.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList();
             if (missing.Count > 0)
             {
                 var startCol = current.Count + 1;
-                var range = $"'{tab}'!{ColumnLetter(startCol)}1";
-                var body = new ValueRange { Values = new List<IList<object>> { missing.Cast<object>().ToList() } };
-                var upd = _service.Spreadsheets.Values.Update(body, _spreadsheetId, range);
-                upd.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.RAW;
-                await upd.ExecuteAsync(ct);
-                _logger.LogInformation("Tab {Tab}: added columns {Columns}.", tab, string.Join(", ", missing));
+                headerWrites.Add(new ValueRange
+                {
+                    Range = $"'{tab}'!{ColumnLetter(startCol)}1",
+                    Values = new List<IList<object>> { missing.Cast<object>().ToList() }
+                });
+                _logger.LogInformation("Tab {Tab}: adding columns {Columns}.", tab, string.Join(", ", missing));
             }
 
             var sheet = existing[tab];
             var sheetId = sheet.Properties.SheetId ?? 0;
+
+            // A tab needs at least as many grid columns as header names (new tabs start with 26).
+            var neededColumns = current.Count + missing.Count;
+            var gridColumns = sheet.Properties.GridProperties?.ColumnCount ?? 26;
+            if (neededColumns > gridColumns)
+            {
+                formatRequests.Insert(0, new Request
+                {
+                    AppendDimension = new AppendDimensionRequest { SheetId = sheetId, Dimension = "COLUMNS", Length = neededColumns - gridColumns }
+                });
+            }
+
             if ((sheet.Properties.GridProperties?.FrozenRowCount ?? 0) == 0)
             {
                 formatRequests.Add(new Request
@@ -281,10 +303,17 @@ public sealed class SheetStore
             }
         }
 
+        // Grid size first (so new header cells fit), then the header names.
         if (formatRequests.Count > 0)
         {
             await _service.Spreadsheets.BatchUpdate(new BatchUpdateSpreadsheetRequest { Requests = formatRequests }, _spreadsheetId)
                 .ExecuteAsync(ct);
+        }
+
+        if (headerWrites.Count > 0)
+        {
+            var body = new BatchUpdateValuesRequest { ValueInputOption = "RAW", Data = headerWrites };
+            await _service.Spreadsheets.Values.BatchUpdate(body, _spreadsheetId).ExecuteAsync(ct);
         }
 
         _tables.Clear();
