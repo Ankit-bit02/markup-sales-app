@@ -117,9 +117,31 @@ public class Party : IEntity, IActivatable
     public bool IsActive { get; set; } = true;
 }
 
+public class Brand : IEntity, IActivatable
+{
+    public string Id { get; set; } = "";
+
+    /// <summary>Short code, e.g. "BM". Stored in capitals.</summary>
+    [Required(ErrorMessage = "Enter a brand code."), StringLength(10, MinimumLength = 1)]
+    [RegularExpression(@"^[A-Za-z0-9\-]+$", ErrorMessage = "Brand code can contain letters, numbers and - only.")]
+    public string Code { get; set; } = "";
+
+    [Required(ErrorMessage = "Enter the brand name."), StringLength(80, MinimumLength = 2)]
+    public string Name { get; set; } = "";
+
+    [StringLength(300)]
+    public string Description { get; set; } = "";
+
+    public bool IsActive { get; set; } = true;
+}
 public class Product : IEntity, IActivatable
 {
     public string Id { get; set; } = "";
+
+
+    /// <summary>The brand (category) this product belongs to.</summary>
+    [Required(ErrorMessage = "Select a brand."), StringLength(40)]
+    public string BrandId { get; set; } = "";
 
     [Required, StringLength(30, MinimumLength = 1)]
     public string Code { get; set; } = "";

@@ -1,18 +1,58 @@
 @page "/admin/products"
+@inject ApiClient Api
+@inject AuthSession Auth
 
 <PageTitle>Products - MARK_UP</PageTitle>
 
 <RoleGuard Allow="@Roles.Admin">
-    <PageHeader Title="Products" Subtitle="Product codes, units and rates. Orders are priced at the RT (retailer) rate per base unit." IconName="package" />
+    <PageHeader Title="Products" Subtitle="Products by brand, with units and rates. Orders are priced at the RT (retailer) rate per base unit." IconName="package">
+        <Actions>
+            <button class="btn" @onclick="() => { importOpen = true; }"><Icon Name="upload" /> Import from Excel</button>
+        </Actions>
+    </PageHeader>
 
-    <MasterList TItem="Product" Title="All products" ItemName="product" ItemNamePlural="products" IconName="package"
+    <Alert Kind="error" Message="@error" />
+    @if (brandsLoaded && brands.Count(b => b.IsActive) == 0)
+    {
+        <Alert Kind="warning" Title="Add a brand first">Every product belongs to a brand. <a href="admin/brands">Go to Brands</a>.</Alert>
+    }
+    else if (UnassignedCount > 0)
+    {
+        <Alert Kind="warning" Title='@($"{UnassignedCount} product(s) have no brand")'>
+            Click <b>No brand</b> below to see them. Edit each one and choose its brand, or use <b>Import from Excel</b> with the right brand and the same file.
+        </Alert>
+    }
+
+    @if (brands.Count > 0)
+    {
+        <div class="import-filters brand-chips">
+            <button type="button" class='chip @(brandFilter == "" ? "active" : "")' @onclick='() => { brandFilter = ""; }'>All brands <b>@ActiveProducts.Count()</b></button>
+            @foreach (var b in brands.Where(x => x.IsActive || CountFor(x.Id) > 0))
+            {
+                <button type="button" class='chip @(brandFilter == b.Id ? "active" : "")' @onclick="() => { brandFilter = b.Id; }">
+                    @b.Name <b>@CountFor(b.Id)</b>
+                </button>
+            }
+            @if (UnassignedCount > 0)
+            {
+                <button type="button" class='chip chip-danger @(brandFilter == NoBrand ? "active" : "")' @onclick="() => { brandFilter = NoBrand; }">No brand <b>@UnassignedCount</b></button>
+            }
+        </div>
+    }
+
+    <ProductImportDialog Open="importOpen" Brands="ActiveBrands" DefaultBrandId="@SelectedBrandId"
+                         OnClose="() => { importOpen = false; }" OnImported="ReloadAsync" />
+
+    <MasterList @ref="list" TItem="Product" Title="@ListTitle" ItemName="product" ItemNamePlural="products" IconName="package"
                 ApiPath="api/masters/products"
-                SearchText='@(p => $"{p.Code} {p.Name} {p.GroupName}")'
-                Sort="@(l => l.OrderBy(p => p.GroupName).ThenBy(p => p.Name))"
-                NewItem='@(() => new Product { Unit = "Pcs", ConvFactor = 1, IsActive = true })'>
+                SearchText='@(p => $"{p.Code} {p.Name} {p.GroupName} {BrandName(p.BrandId)}")'
+                Sort="@(l => l.OrderBy(p => BrandName(p.BrandId)).ThenBy(p => p.GroupName).ThenBy(p => p.Name))"
+                Filter="@(p => MatchesBrand(p))"
+                OnLoaded="OnProductsLoaded"
+                NewItem='@(() => new Product { BrandId = SelectedBrandId, Unit = "Pcs", ConvFactor = 1, IsActive = true })'>
         <HeaderCells>
             <th>Product</th>
-            <th>Group</th>
+            <th>Brand / Group</th>
             <th>Units</th>
             <th class="num">MRP NPR</th>
             <th class="num">MRP INR</th>
@@ -24,7 +64,20 @@
                 <div class="cell-title">@p.Name</div>
                 <div class="cell-sub">@p.Code</div>
             </td>
-            <td>@p.GroupName</td>
+            <td>
+                @if (IsUnassigned(p))
+                {
+                    <span class="badge badge-danger no-dot">No brand</span>
+                }
+                else
+                {
+                    <span class="badge badge-info no-dot">@BrandName(p.BrandId)</span>
+                }
+                @if (!string.IsNullOrWhiteSpace(p.GroupName))
+                {
+                    <div class="cell-sub">@p.GroupName</div>
+                }
+            </td>
             <td>
                 @p.Unit
                 @if (!string.IsNullOrWhiteSpace(p.SecondUnit))
@@ -40,14 +93,27 @@
         <FormFields Context="p">
             <div class="section-title full">Product details</div>
             <label class="field">
+                <span class="field-label req">Brand</span>
+                <InputSelect @bind-Value="p.BrandId">
+                    <option value="">Select brand</option>
+                    @foreach (var b in brands.Where(x => x.IsActive || x.Id == p.BrandId))
+                    {
+                        <option value="@b.Id">@b.Name (@b.Code)</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="() => p.BrandId" />
+            </label>
+            <label class="field">
+                <span class="field-label">Group name</span>
+                <InputText @bind-Value="p.GroupName" placeholder="e.g. Bharat Masala - Vat" />
+                <span class="hint">Optional sub-group inside the brand.</span>
+            </label>
+            <label class="field">
                 <span class="field-label req">Product code</span>
                 <InputText @bind-Value="p.Code" placeholder="e.g. P-1001" />
                 <ValidationMessage For="() => p.Code" />
             </label>
-            <label class="field">
-                <span class="field-label">Group name</span>
-                <InputText @bind-Value="p.GroupName" placeholder="e.g. Biscuits" />
-            </label>
+            <span></span>
             <label class="field full">
                 <span class="field-label req">Product name</span>
                 <InputText @bind-Value="p.Name" />
@@ -94,3 +160,67 @@
         </FormFields>
     </MasterList>
 </RoleGuard>
+
+@code {
+    private const string NoBrand = "__none";
+
+    private MasterList<Product>? list;
+    private List<Brand> brands = new();
+    private List<Product> products = new();
+    private bool brandsLoaded;
+    private bool importOpen;
+    private string brandFilter = "";
+    private string? error;
+
+    private IEnumerable<Product> ActiveProducts => products.Where(p => p.IsActive);
+    private List<Brand> ActiveBrands => brands.Where(b => b.IsActive).OrderBy(b => b.Name).ToList();
+
+    /// <summary>The brand picked in the chips, used as default for Add and Import.</summary>
+    private string SelectedBrandId => brands.Any(b => b.Id == brandFilter && b.IsActive) ? brandFilter : "";
+
+    private int UnassignedCount => ActiveProducts.Count(IsUnassigned);
+
+    private string ListTitle => brandFilter switch
+    {
+        "" => "All products",
+        NoBrand => "Products without a brand",
+        _ => BrandName(brandFilter)
+    };
+
+    private bool IsUnassigned(Product p) => brands.All(b => b.Id != p.BrandId);
+
+    private string BrandName(string id) => brands.FirstOrDefault(b => b.Id == id)?.Name ?? "";
+
+    private int CountFor(string brandId) => ActiveProducts.Count(p => p.BrandId == brandId);
+
+    private bool MatchesBrand(Product p) => brandFilter switch
+    {
+        "" => true,
+        NoBrand => IsUnassigned(p),
+        _ => p.BrandId == brandFilter
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin)) return;
+        try
+        {
+            brands = (await Api.GetAsync<List<Brand>>("api/masters/brands")).OrderBy(b => b.Name).ToList();
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            brandsLoaded = true;
+        }
+    }
+
+    private void OnProductsLoaded(List<Product> loaded) => products = loaded;
+
+    private async Task ReloadAsync()
+    {
+        if (list != null) await list.LoadAsync();
+    }
+}

@@ -145,6 +145,12 @@
     [Parameter] public Func<TItem>? NewItem { get; set; }
     [Parameter] public Func<IEnumerable<TItem>, IEnumerable<TItem>>? Sort { get; set; }
 
+    /// <summary>Optional extra filter set by the page (e.g. brand chips).</summary>
+    [Parameter] public Func<TItem, bool>? Filter { get; set; }
+
+    /// <summary>Raised after every (re)load with all records, so a page can show counts.</summary>
+    [Parameter] public EventCallback<List<TItem>> OnLoaded { get; set; }
+
     /// <summary>Raised after any save or (de)activation, so a page can refresh related lists.</summary>
     [Parameter] public EventCallback OnChanged { get; set; }
 
@@ -167,6 +173,7 @@
         {
             IEnumerable<TItem> list = items ?? new List<TItem>();
             if (!showInactive) list = list.Where(x => x.IsActive);
+            if (Filter != null) list = list.Where(Filter);
             var f = search.Trim();
             if (f.Length > 0 && SearchText != null)
                 list = list.Where(x => SearchText(x).Contains(f, StringComparison.OrdinalIgnoreCase));
@@ -182,6 +189,7 @@
         try
         {
             items = await Api.GetAsync<List<TItem>>(ApiPath);
+            await OnLoaded.InvokeAsync(items);
         }
         catch (ApiException ex)
         {

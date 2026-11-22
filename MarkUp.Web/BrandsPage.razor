@@ -1,0 +1,86 @@
+﻿@page "/admin/brands"
+@inject ApiClient Api
+@inject AuthSession Auth
+
+<PageTitle>Brands - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Brands" Subtitle="Brands or categories the company imports. Every product belongs to one brand." IconName="layers" />
+
+    <Alert Kind="error" Message="@error" />
+    @if (unassigned > 0)
+    {
+        <Alert Kind="warning" Title='@($"{unassigned} product(s) have no brand yet")'>
+            Open <a href="admin/products">Products</a> → <b>Import from Excel</b>, choose the brand and upload the same file again
+            (matching products get the brand), or edit each product and choose its brand.
+        </Alert>
+    }
+
+    <MasterList TItem="Brand" Title="All brands" ItemName="brand" ItemNamePlural="brands" IconName="layers"
+                ApiPath="api/masters/brands"
+                SearchText='@(b => $"{b.Code} {b.Name} {b.Description}")'
+                Sort="@(l => l.OrderBy(b => b.Name))"
+                OnChanged="LoadProductsAsync">
+        <HeaderCells>
+            <th>Brand</th>
+            <th>Code</th>
+            <th>Description</th>
+            <th class="num">Active products</th>
+        </HeaderCells>
+        <RowCells Context="b">
+            <td class="cell-title">@b.Name</td>
+            <td><span class="badge badge-info no-dot">@b.Code</span></td>
+            <td class="muted">@b.Description</td>
+            <td class="num"><b>@ProductCount(b.Id)</b></td>
+        </RowCells>
+        <FormFields Context="b">
+            <label class="field">
+                <span class="field-label req">Brand code</span>
+                <InputText @bind-Value="b.Code" maxlength="10" style="text-transform:uppercase" placeholder="e.g. BM" />
+                <span class="hint">Short code, up to 10 letters or numbers.</span>
+                <ValidationMessage For="() => b.Code" />
+            </label>
+            <label class="field">
+                <span class="field-label req">Brand name</span>
+                <InputText @bind-Value="b.Name" placeholder="e.g. Bharat Masala" />
+                <ValidationMessage For="() => b.Name" />
+            </label>
+            <label class="field full">
+                <span class="field-label">Description</span>
+                <InputTextArea @bind-Value="b.Description" rows="2" placeholder="Optional, e.g. spices and pasta imported from India" />
+                <ValidationMessage For="() => b.Description" />
+            </label>
+        </FormFields>
+    </MasterList>
+</RoleGuard>
+
+@code {
+    private List<Product> products = new();
+    private HashSet<string> brandIds = new();
+    private int unassigned;
+    private string? error;
+
+    private int ProductCount(string brandId) => products.Count(p => p.IsActive && p.BrandId == brandId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin)) return;
+        await LoadProductsAsync();
+    }
+
+    private async Task LoadProductsAsync()
+    {
+        try
+        {
+            var brands = await Api.GetAsync<List<Brand>>("api/masters/brands");
+            brandIds = brands.Select(b => b.Id).ToHashSet();
+            products = await Api.GetAsync<List<Product>>("api/masters/products");
+            unassigned = products.Count(p => p.IsActive && !brandIds.Contains(p.BrandId));
+            error = null;
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+    }
+}

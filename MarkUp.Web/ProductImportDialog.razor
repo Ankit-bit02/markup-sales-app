@@ -1,0 +1,370 @@
+﻿@* Upload an Excel/CSV product list: preview first, then import. *@
+@inject ApiClient Api
+@inject Browser Browser
+@inject ToastService Toast
+
+@if (Open)
+{
+    <div class="modal-backdrop">
+        <div class="modal lg" role="dialog" aria-modal="true">
+            <div class="modal-header">
+                <h2><Icon Name="upload" /> Import products</h2>
+                <button type="button" class="btn btn-ghost btn-icon" aria-label="Close" disabled="@Busy" @onclick="CloseAsync"><Icon Name="x" /></button>
+            </div>
+
+            <div class="modal-body">
+                <Alert Kind="error" Message="@error" />
+
+                @if (preview == null)
+                {
+                    if (Brands.Count == 0)
+                    {
+                        <Alert Kind="warning" Title="Add a brand first">Every product belongs to a brand. <a href="admin/brands">Go to Brands</a>.</Alert>
+                    }
+                    <label class="field mb-2" style="max-width:420px">
+                        <span class="field-label req">Brand for these products</span>
+                        <select @bind="brandId" disabled="@reading">
+                            <option value="">Select brand</option>
+                            @foreach (var b in Brands)
+                            {
+                                <option value="@b.Id">@b.Name (@b.Code)</option>
+                            }
+                        </select>
+                        <span class="hint">All rows in the file go into this brand. Upload one file per brand.</span>
+                    </label>
+
+                    <Alert Kind="info" Title="How it works">
+                        Upload the product list exported from your accounting software (Excel .xlsx or .csv).
+                        You will see a preview first; nothing is saved until you click <b>Import</b>.
+                        Existing products of this brand (same code, or same name when there is no code) are <b>updated</b>;
+                        products without a brand are matched too and get this brand.
+                        Products not in the file are not changed.
+                    </Alert>
+
+                    <label class='drop-zone @(reading ? "busy" : "") @(brandId.Length == 0 ? "disabled" : "")'>
+                        @if (reading)
+                        {
+                            <span class="spinner"></span>
+                            <b>Reading @fileName...</b>
+                            <span class="muted small">Checking every row. This can take a few seconds.</span>
+                        }
+                        else if (brandId.Length == 0)
+                        {
+                            <span class="drop-icon"><Icon Name="layers" Class="lg" /></span>
+                            <b>Select the brand first</b>
+                            <span class="muted small">Then choose or drop the Excel file here.</span>
+                        }
+                        else
+                        {
+                            <span class="drop-icon"><Icon Name="sheet" Class="lg" /></span>
+                            <b>Click to choose a file, or drag it here</b>
+                            <span class="muted small">Excel (.xlsx) or CSV, up to 5 MB</span>
+                        }
+                        <InputFile OnChange="OnFileSelectedAsync" accept=".xlsx,.xlsm,.csv" disabled="@(reading || brandId.Length == 0)" />
+                    </label>
+
+                    <div class="row mt-2" style="justify-content:space-between">
+                        <span class="muted small">Columns read: Code (or Alias), Name, Group Name, Main Unit, Alt. Unit, CON Factor, MRP, MRP INR, DLR Rate, Sale Price.</span>
+                        <button type="button" class="btn btn-ghost btn-sm" disabled="@templateBusy" @onclick="DownloadTemplateAsync">
+                            @if (templateBusy)
+                            {
+                                <span class="spinner"></span>
+                            }
+                            else
+                            {
+                                <Icon Name="download" Class="sm" />
+                            }
+                            <span>Download template</span>
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="import-file">
+                        <Icon Name="sheet" />
+                        <div class="spacer" style="min-width:0">
+                            <b>@preview.FileName</b>
+                            <div class="muted small">@preview.Rows.Count row(s) found · Brand: <b>@preview.BrandName</b></div>
+                        </div>
+                        <button type="button" class="btn btn-sm" disabled="@Busy" @onclick="ChooseAnother"><Icon Name="refresh" Class="sm" /> Choose another file</button>
+                    </div>
+
+                    <div class="import-filters">
+                        <button type="button" class='chip @(filter == "" ? "active" : "")' @onclick='() => { filter = ""; }'>All <b>@preview.Rows.Count</b></button>
+                        <button type="button" class='chip chip-success @(filter == ImportActions.New ? "active" : "")' @onclick="() => { filter = ImportActions.New; }">New <b>@preview.NewCount</b></button>
+                        <button type="button" class='chip chip-info @(filter == ImportActions.Update ? "active" : "")' @onclick="() => { filter = ImportActions.Update; }">Update <b>@preview.UpdateCount</b></button>
+                        <button type="button" class='chip @(filter == ImportActions.Unchanged ? "active" : "")' @onclick="() => { filter = ImportActions.Unchanged; }">Unchanged <b>@preview.UnchangedCount</b></button>
+                        <button type="button" class='chip chip-danger @(filter == ImportActions.Error ? "active" : "")' @onclick="() => { filter = ImportActions.Error; }">Errors <b>@preview.ErrorCount</b></button>
+                    </div>
+
+                    @if (preview.ErrorCount > 0)
+                    {
+                        <Alert Kind="warning" Class="compact">
+                            @preview.ErrorCount row(s) have problems and will be <b>skipped</b>. Fix them in the file and upload again, or import the rest now.
+                        </Alert>
+                    }
+
+                    <details class="mapped">
+                        <summary>Columns recognised (@preview.MappedColumns.Count)</summary>
+                        <ul>
+                            @foreach (var m in preview.MappedColumns)
+                            {
+                                <li>@m</li>
+                            }
+                        </ul>
+                    </details>
+
+                    <div class="table-wrap import-table">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th class="num">Row</th>
+                                    <th>Status</th>
+                                    <th>Code</th>
+                                    <th>Product</th>
+                                    <th>Units</th>
+                                    <th class="num">MRP</th>
+                                    <th class="num">RT rate</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in VisibleRows)
+                                {
+                                    <tr class='@(r.Action == ImportActions.Error ? "row-error" : "")'>
+                                        <td class="num muted">@r.RowNumber</td>
+                                        <td><span class="badge @BadgeClass(r.Action)">@r.Action</span></td>
+                                        <td class="nowrap">@r.Code</td>
+                                        <td>
+                                            <div class="cell-title">@r.Name</div>
+                                            @if (!string.IsNullOrEmpty(r.GroupName))
+                                            {
+                                                <div class="cell-sub">@r.GroupName</div>
+                                            }
+                                        </td>
+                                        <td class="nowrap">
+                                            @r.Unit
+                                            @if (!string.IsNullOrEmpty(r.SecondUnit))
+                                            {
+                                                <div class="cell-sub">1 @r.SecondUnit = @Fmt.Qty(r.ConvFactor) @r.Unit</div>
+                                            }
+                                        </td>
+                                        <td class="num">@Fmt.Money(r.MrpNpr)</td>
+                                        <td class="num"><b>@Fmt.Money(r.RetailerRate)</b></td>
+                                        <td class='small @(r.Action == ImportActions.Error ? "text-danger" : "muted")'>@r.Message</td>
+                                    </tr>
+                                }
+                                @if (!VisibleRows.Any())
+                                {
+                                    <tr><td colspan="8" class="muted" style="text-align:center;padding:24px">No rows in this filter.</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn" disabled="@Busy" @onclick="CloseAsync">Cancel</button>
+                @if (preview != null)
+                {
+                    <button type="button" class="btn btn-primary" disabled="@(Busy || ToImport == 0)" @onclick="ApplyAsync">
+                        @if (applying)
+                        {
+                            <span class="spinner"></span>
+                            <span>Importing...</span>
+                        }
+                        else
+                        {
+                            <Icon Name="check" />
+                            <span>@(ToImport == 0 ? "Nothing to import" : $"Import {ToImport} product(s)")</span>
+                        }
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const long MaxFileBytes = 5 * 1024 * 1024;
+    private const string ImportUrl = "api/masters/products/import";
+
+    [Parameter] public bool Open { get; set; }
+
+    /// <summary>Active brands to choose from.</summary>
+    [Parameter] public List<Brand> Brands { get; set; } = new();
+
+    /// <summary>Brand selected when the dialog opens (e.g. the brand filter on the Products page).</summary>
+    [Parameter] public string DefaultBrandId { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    /// <summary>Raised after products were saved, so the list can reload.</summary>
+    [Parameter] public EventCallback OnImported { get; set; }
+
+    private string brandId = "";
+    private bool wasOpen;
+    private byte[]? fileData;
+    private string fileName = "";
+    private string fileType = "";
+    private ProductImportResult? preview;
+    private string filter = "";
+    private string? error;
+    private bool reading;
+    private bool applying;
+    private bool templateBusy;
+
+    private bool Busy => reading || applying;
+
+    private string Url(bool apply) =>
+        $"{ImportUrl}?brandId={Uri.EscapeDataString(brandId)}" + (apply ? "&apply=true" : "");
+
+    protected override void OnParametersSet()
+    {
+        // Pick the default brand each time the dialog opens.
+        if (Open && !wasOpen)
+        {
+            brandId = Brands.Any(b => b.Id == DefaultBrandId) ? DefaultBrandId
+                : Brands.Count == 1 ? Brands[0].Id
+                : "";
+        }
+        wasOpen = Open;
+    }
+
+    private int ToImport => preview == null ? 0 : preview.NewCount + preview.UpdateCount;
+
+    private IEnumerable<ProductImportRow> VisibleRows =>
+        preview == null ? Enumerable.Empty<ProductImportRow>()
+        : filter.Length == 0 ? preview.Rows
+        : preview.Rows.Where(r => r.Action == filter);
+
+    private static string BadgeClass(string action) => action switch
+    {
+        ImportActions.New => "badge-success",
+        ImportActions.Update => "badge-info",
+        ImportActions.Error => "badge-danger",
+        _ => "badge-muted"
+    };
+
+    private async Task OnFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        error = null;
+        if (brandId.Length == 0)
+        {
+            error = "Select the brand first.";
+            return;
+        }
+        var file = e.File;
+        var ext = Path.GetExtension(file.Name).ToLowerInvariant();
+        if (ext == ".xls")
+        {
+            error = "Old .xls files are not supported. Open the file in Excel, choose Save As → Excel Workbook (.xlsx), then upload that file.";
+            return;
+        }
+        if (ext is not (".xlsx" or ".xlsm" or ".csv"))
+        {
+            error = "Choose an Excel (.xlsx) or CSV file.";
+            return;
+        }
+        if (file.Size > MaxFileBytes)
+        {
+            error = "The file is larger than 5 MB.";
+            return;
+        }
+
+        reading = true;
+        fileName = file.Name;
+        fileType = file.ContentType;
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxFileBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            fileData = ms.ToArray();
+
+            preview = await Api.PostFileAsync<ProductImportResult>(Url(apply: false), fileData, fileName, fileType);
+            filter = preview.ErrorCount > 0 ? ImportActions.Error : "";
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+            fileData = null;
+        }
+        catch (Exception)
+        {
+            error = "The file could not be read. Try again.";
+            fileData = null;
+        }
+        finally
+        {
+            reading = false;
+        }
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (fileData == null || preview == null) return;
+        applying = true;
+        error = null;
+        try
+        {
+            var result = await Api.PostFileAsync<ProductImportResult>(Url(apply: true), fileData, fileName, fileType);
+            var parts = new List<string>();
+            if (result.NewCount > 0) parts.Add($"{result.NewCount} added");
+            if (result.UpdateCount > 0) parts.Add($"{result.UpdateCount} updated");
+            if (result.ErrorCount > 0) parts.Add($"{result.ErrorCount} skipped (errors)");
+            Toast.Success(parts.Count > 0 ? string.Join(", ", parts) + "." : "Nothing needed to change.", $"Imported into {result.BrandName}");
+            Reset();
+            await OnImported.InvokeAsync();
+            await OnClose.InvokeAsync();
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            applying = false;
+        }
+    }
+
+    private async Task DownloadTemplateAsync()
+    {
+        templateBusy = true;
+        try
+        {
+            var file = await Api.DownloadAsync(ImportUrl + "/template", "Product-Import-Template.xlsx");
+            await Browser.DownloadAsync(file.FileName, file.ContentType, file.Data);
+        }
+        catch (ApiException ex)
+        {
+            Toast.Error(ex.Message, "Download failed");
+        }
+        finally
+        {
+            templateBusy = false;
+        }
+    }
+
+    private void ChooseAnother()
+    {
+        Reset();
+    }
+
+    private void Reset()
+    {
+        preview = null;
+        fileData = null;
+        fileName = "";
+        fileType = "";
+        filter = "";
+        error = null;
+    }
+
+    private async Task CloseAsync()
+    {
+        if (Busy) return;
+        Reset();
+        await OnClose.InvokeAsync();
+    }
+}

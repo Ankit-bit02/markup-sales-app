@@ -258,6 +258,16 @@
 
                 <div class="add-product">
                     <div class="section-title mt-0"><Icon Name="plus" Class="sm" /> Add product</div>
+                    @if (BrandsWithProducts.Count > 1)
+                    {
+                        <div class="import-filters brand-chips">
+                            <button type="button" class='chip @(brandFilter == "" ? "active" : "")' @onclick='() => { brandFilter = ""; addProductId = ""; }'>All brands</button>
+                            @foreach (var b in BrandsWithProducts)
+                            {
+                                <button type="button" class='chip @(brandFilter == b.Id ? "active" : "")' @onclick="() => { brandFilter = b.Id; addProductId = string.Empty; }">@b.Name</button>
+                            }
+                        </div>
+                    }
                     <div class="form-grid cols-2">
                         <div class="input-icon">
                             <Icon Name="search" />
@@ -343,6 +353,7 @@
     private string partyId = "";
     private string reason = "";
     private string productFilter = "";
+    private string brandFilter = "";
     private string addProductId = "";
     private readonly List<LineModel> lines = new();
     private bool saving;
@@ -361,7 +372,7 @@
         {
             var count = FilteredProducts.Count();
             if (count == 0) return "No matching products";
-            return productFilter.Trim().Length > 0 ? $"Select from {count} match(es)" : "Select a product to add";
+            return productFilter.Trim().Length > 0 || brandFilter.Length > 0 ? $"Select from {count} product(s)" : "Select a product to add";
         }
     }
 
@@ -370,6 +381,11 @@
 
     private Party? SelectedParty => boot?.Parties.FirstOrDefault(p => p.Id == partyId);
 
+    /// <summary>Active brands that have at least one product (chips on the order screen).</summary>
+    private List<Brand> BrandsWithProducts =>
+        boot == null ? new List<Brand>()
+        : boot.Brands.Where(b => boot.Products.Any(p => p.BrandId == b.Id)).ToList();
+
     private IEnumerable<Product> FilteredProducts
     {
         get
@@ -377,6 +393,7 @@
             if (boot == null) return Enumerable.Empty<Product>();
             var f = productFilter.Trim();
             var list = boot.Products.AsEnumerable();
+            if (brandFilter.Length > 0) list = list.Where(p => p.BrandId == brandFilter);
             if (f.Length > 0)
                 list = list.Where(p => p.Name.Contains(f, StringComparison.OrdinalIgnoreCase) || p.Code.Contains(f, StringComparison.OrdinalIgnoreCase));
             return list.Take(200);

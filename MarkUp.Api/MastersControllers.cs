@@ -198,19 +198,41 @@ public sealed class PartiesController : MasterControllerBase<Party>
     }
 }
 
+[Route("api/masters/brands")]
+public sealed class BrandsController : MasterControllerBase<Brand>
+{
+    public BrandsController(SheetStore store) : base(store) { }
+
+    protected override Task ValidateAsync(Brand item, List<Brand> all)
+    {
+        item.Code = item.Code.ToUpperInvariant();
+        if (all.Any(x => x.Id != item.Id && Same(x.Code, item.Code)))
+            throw AppException.Conflict($"Brand code \"{item.Code}\" is already used.");
+        if (all.Any(x => x.Id != item.Id && Same(x.Name, item.Name)))
+            throw AppException.Conflict($"Brand \"{item.Name}\" already exists.");
+        return Task.CompletedTask;
+    }
+}
+
 [Route("api/masters/products")]
 public sealed class ProductsController : MasterControllerBase<Product>
 {
     public ProductsController(SheetStore store) : base(store) { }
 
-    protected override Task ValidateAsync(Product item, List<Product> all)
+    protected override async Task ValidateAsync(Product item, List<Product> all)
     {
         if (string.IsNullOrWhiteSpace(item.SecondUnit)) item.ConvFactor = 1;
         else if (item.ConvFactor < 1) throw AppException.BadRequest("Conversion must be at least 1 when a 2nd unit is set.");
 
+        var brand = await Store.FindAsync<Brand>(item.BrandId) ?? throw AppException.BadRequest("Select a valid brand.");
+        var previous = all.FirstOrDefault(x => x.Id == item.Id);
+        if (!brand.IsActive && previous?.BrandId != item.BrandId)
+            throw AppException.BadRequest($"Brand \"{brand.Name}\" is inactive. Activate it first or choose another brand.");
+
         if (all.Any(x => x.Id != item.Id && Same(x.Code, item.Code)))
             throw AppException.Conflict($"Product code \"{item.Code}\" is already used.");
-        return Task.CompletedTask;
+        if (all.Any(x => x.Id != item.Id && x.BrandId == item.BrandId && Same(x.Name, item.Name)))
+            throw AppException.Conflict($"Product \"{item.Name}\" already exists in brand {brand.Name}.");
     }
 }
 

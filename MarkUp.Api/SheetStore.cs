@@ -24,6 +24,7 @@ public static class TableRegistry
         [typeof(Dealer)] = "Dealers",
         [typeof(Beat)] = "Beats",
         [typeof(Party)] = "Parties",
+        [typeof(Brand)] = "Brands",
         [typeof(Product)] = "Products",
         [typeof(Scheme)] = "Schemes",
         [typeof(Target)] = "Targets",
@@ -435,6 +436,44 @@ public sealed class SheetStore
 
         var newRows = new List<CachedRow>(table.Rows);
         newRows[pos] = new CachedRow(existing.RowNumber, values);
+        _tables[tab] = new Table { Header = table.Header, Rows = newRows, LoadedAtUtc = table.LoadedAtUtc };
+    }
+
+
+
+
+    /// <summary>Updates many existing rows of one tab in a single Google Sheets call.</summary>
+    public async Task UpdateRangeAsync<T>(IReadOnlyList<T> items) where T : class, IEntity, new()
+    {
+        EnsureInLock();
+        if (items.Count == 0) return;
+
+        var tab = TableRegistry.TabName(typeof(T));
+        var table = await GetTableAsync(tab);
+        var idIndex = table.Header.FindIndex(h => h.Equals("Id", StringComparison.OrdinalIgnoreCase));
+        if (idIndex < 0) throw new InvalidOperationException($"Tab {tab} has no Id column.");
+
+        var newRows = new List<CachedRow>(table.Rows);
+        var data = new List<ValueRange>();
+        var lastColumn = ColumnLetter(table.Header.Count);
+        foreach (var item in items)
+        {
+            var pos = newRows.FindIndex(r => r.Values[idIndex] == item.Id);
+            if (pos < 0) throw AppException.NotFound("Record not found.");
+
+            var rowNumber = newRows[pos].RowNumber;
+            var values = RowMapper<T>.ToRow(table.Header, item);
+            data.Add(new ValueRange
+            {
+                Range = $"'{tab}'!A{rowNumber}:{lastColumn}{rowNumber}",
+                Values = new List<IList<object>> { values.Cast<object>().ToList() }
+            });
+            newRows[pos] = new CachedRow(rowNumber, values);
+        }
+
+        var body = new BatchUpdateValuesRequest { ValueInputOption = "RAW", Data = data };
+        await _service.Spreadsheets.Values.BatchUpdate(body, _spreadsheetId).ExecuteAsync();
+
         _tables[tab] = new Table { Header = table.Header, Rows = newRows, LoadedAtUtc = table.LoadedAtUtc };
     }
 

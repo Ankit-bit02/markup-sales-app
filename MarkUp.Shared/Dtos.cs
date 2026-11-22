@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace MarkUp.Shared;
 
@@ -99,6 +99,7 @@ public class SalesBootstrap
     public string AttendanceLocation { get; set; } = "";
     public List<Beat> Beats { get; set; } = new();
     public List<Party> Parties { get; set; } = new();
+    public List<Brand> Brands { get; set; } = new();
     public List<Product> Products { get; set; } = new();
     public List<Scheme> Schemes { get; set; } = new();
     public List<PartyType> PartyTypes { get; set; } = new();
@@ -318,4 +319,48 @@ public class ProfileSaveRequest
 
     [StringLength(ProfileOptions.MaxPhotoChars, ErrorMessage = "The profile picture is too large. Choose a smaller picture.")]
     public string Photo { get; set; } = "";
+}
+
+
+
+// ---------------------------------------------------------------- Product import
+
+public static class ImportActions
+{
+    public const string New = "New";
+    public const string Update = "Update";
+    public const string Unchanged = "Unchanged";
+    public const string Error = "Error";
+}
+
+public class ProductImportRow
+{
+    /// <summary>Row number in the uploaded file (as Excel shows it).</summary>
+    public int RowNumber { get; set; }
+    public string Action { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string Code { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string GroupName { get; set; } = "";
+    public string Unit { get; set; } = "";
+    public string SecondUnit { get; set; } = "";
+    public decimal ConvFactor { get; set; }
+    public decimal MrpNpr { get; set; }
+    public decimal RetailerRate { get; set; }
+}
+
+public class ProductImportResult
+{
+    /// <summary>False = preview only (nothing saved). True = rows were saved.</summary>
+    public bool Applied { get; set; }
+    public string FileName { get; set; } = "";
+    public string BrandName { get; set; } = "";
+    public int NewCount { get; set; }
+    public int UpdateCount { get; set; }
+    public int UnchangedCount { get; set; }
+    public int ErrorCount { get; set; }
+
+    /// <summary>Which file columns were recognised, e.g. "Name → Product name".</summary>
+    public List<string> MappedColumns { get; set; } = new();
+    public List<ProductImportRow> Rows { get; set; } = new();
 }

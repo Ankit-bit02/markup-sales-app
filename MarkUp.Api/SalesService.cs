@@ -36,7 +36,11 @@ public sealed class SalesService
         var beats = m.Beats.Values.Where(b => b.IsActive && b.AssignedUserId == userId).OrderBy(b => b.Name).ToList();
         var beatIds = beats.Select(b => b.Id).ToHashSet();
         var parties = m.Parties.Values.Where(p => p.IsActive && beatIds.Contains(p.BeatId)).OrderBy(p => p.Name).ToList();
-        var products = m.Products.Values.Where(p => p.IsActive).OrderBy(p => p.Name).ToList();
+        var brands = (await _store.GetAllAsync<Brand>()).Where(b => b.IsActive).OrderBy(b => b.Name).ToList();
+        var inactiveBrandIds = (await _store.GetAllAsync<Brand>()).Where(b => !b.IsActive).Select(b => b.Id).ToHashSet();
+        var products = m.Products.Values
+            .Where(p => p.IsActive && !inactiveBrandIds.Contains(p.BrandId))
+            .OrderBy(p => p.Name).ToList();
         var productIds = products.Select(p => p.Id).ToHashSet();
         var schemes = m.Schemes.Values
             .Where(s => s.IsActive && s.EndDate >= today && productIds.Contains(s.ProductId))
@@ -57,6 +61,7 @@ public sealed class SalesService
             AttendanceLocation = attendance?.LocationName ?? "",
             Beats = beats,
             Parties = parties,
+            Brands = brands,
             Products = products,
             Schemes = schemes,
             PartyTypes = partyTypes,

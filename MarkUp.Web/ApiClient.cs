@@ -45,6 +45,15 @@ public sealed class ApiClient
 
     public Task<T> PutAsync<T>(string url, object? body) => SendAsync<T>(HttpMethod.Put, url, body);
 
+    /// <summary>Uploads one file as multipart/form-data (field name "file") and reads the JSON reply.</summary>
+    public Task<T> PostFileAsync<T>(string url, byte[] data, string fileName, string contentType)
+    {
+        var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(data);
+        file.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
+        content.Add(file, "file", fileName);
+        return SendAsync<T>(HttpMethod.Post, url, content);
+    }
     public async Task DeleteAsync(string url)
     {
         using var resp = await RawAsync(HttpMethod.Delete, url, null);
@@ -82,7 +91,11 @@ public sealed class ApiClient
         {
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _auth.Token);
         }
-        if (body != null)
+        if (body is HttpContent content)
+        {
+            req.Content = content;
+        }
+        else if (body != null)
         {
             req.Content = JsonContent.Create(body, body.GetType(), options: Json);
         }
