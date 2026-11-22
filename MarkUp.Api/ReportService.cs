@@ -12,6 +12,9 @@ public sealed class ReportQuery
     public string DealerId { get; set; } = "";
     public string BeatId { get; set; } = "";
     public string View { get; set; } = TargetViews.Daily;
+    /// <summary>Date range for range reports (Attendance). Both default to Date.</summary>
+    public DateOnly From { get; set; }
+    public DateOnly To { get; set; }
 }
 
 public sealed class ReportService
@@ -39,6 +42,7 @@ public sealed class ReportService
         ReportKinds.Products => ProductsAsync(),
         ReportKinds.TargetVsAch => TargetVsAchAsync(q),
         ReportKinds.ProductTarget => ProductTargetAsync(q),
+        ReportKinds.Attendance => AttendanceAsync(q),
         _ => throw AppException.NotFound("Unknown report.")
     };
 
@@ -448,6 +452,48 @@ public sealed class ReportService
         t.Footer.Add(new("Working days to date", elapsed.ToString(Inv)));
         return t;
     }
+    // ------------------------------------------------------------------ Attendance
+
+    private async Task<ReportTable> AttendanceAsync(ReportQuery q)
+    {
+        var m = await _masters.LoadAsync();
+        var rows = (await _store.GetAllAsync<Attendance>())
+            .Where(a => a.Date >= q.From && a.Date <= q.To)
+            .Where(a => string.IsNullOrEmpty(q.UserId) || a.UserId == q.UserId)
+            .OrderBy(a => a.Date)
+            .ThenBy(a => a.LoginTime, StringComparer.Ordinal)
+            .ThenBy(a => m.UserName(a.UserId))
+            .ToList();
+
+        var t = new ReportTable
+        {
+            Title = "Attendance Report",
+            Header =
+            {
+                new("From", DateText(q.From)),
+                new("To", DateText(q.To)),
+                new("User", string.IsNullOrEmpty(q.UserId) ? "All" : m.UserName(q.UserId))
+            },
+            Columns = { "SN", "Date", "Day", "User Name", "Role", "Sign-in Time", "Location", "GPS" }
+        };
+
+        var sn = 1;
+        foreach (var a in rows)
+        {
+            m.Users.TryGetValue(a.UserId, out var u);
+            t.Rows.Add(new List<string>
+            {
+                (sn++).ToString(Inv), DateText(a.Date), a.Date.DayOfWeek.ToString(), u?.Name ?? a.UserId, u?.Role ?? "",
+                a.LoginTime, a.NoGps ? "No GPS" : a.LocationName,
+                a.NoGps ? "No GPS" : string.Create(Inv, $"{a.Lat:0.000000}, {a.Lng:0.000000}")
+            });
+        }
+
+        t.Footer.Add(new("Sign-ins", rows.Count.ToString(Inv)));
+        t.Footer.Add(new("People", rows.Select(a => a.UserId).Distinct().Count().ToString(Inv)));
+        t.Footer.Add(new("Days", (q.To.DayNumber - q.From.DayNumber + 1).ToString(Inv)));
+        return t;
+    }
 }
 
 [ApiController]
@@ -467,29 +513,40 @@ public sealed class ReportsController : ControllerBase
     }
 
     /// <summary>
-    /// GET /api/reports/{kind}?date=yyyy-MM-dd&amp;userId=&amp;dealerId=&amp;beatId=&amp;view=daily|mtd|monthly|overall&amp;format=json|xlsx|pdf
-    /// Sales users always get their own data only.
+    /// GET /api/reports/{kind}?date=yyyy-MM-dd&amp;from=yyyy-MM-dd&amp;to=yyyy-MM-dd&amp;userId=&amp;dealerId=&amp;beatId=&amp;view=daily|mtd|monthly|overall&amp;format=json|xlsx|pdf
+    /// from/to are used by the Attendance report (both default to date).
+    /// Sales users always get their own data only; Bill users get only their own attendance.
     /// </summary>
     [HttpGet("{kind}")]
     public async Task<IActionResult> Get(string kind, [FromQuery] string? date, [FromQuery] string? userId,
-        [FromQuery] string? dealerId, [FromQuery] string? beatId, [FromQuery] string? view, [FromQuery] string? format)
+        [FromQuery] string? dealerId, [FromQuery] string? beatId, [FromQuery] string? view, [FromQuery] string? format,
+        [FromQuery] string? from, [FromQuery] string? to)
     {
-        var day = _clock.Today;
-        if (!string.IsNullOrWhiteSpace(date) &&
-            !DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day))
-            throw AppException.BadRequest("Date must be in yyyy-MM-dd format.");
+        var day = ParseDate(date, _clock.Today);
+        var fromDay = ParseDate(from, day);
+        var toDay = ParseDate(to, day);
+        if (fromDay > toDay) throw AppException.BadRequest("From date must be on or before To date.");
+        if (toDay.DayNumber - fromDay.DayNumber > 366) throw AppException.BadRequest("Pick a range of one year or less.");
+
+        // Sales see only their own data in every report; Bill see only their own attendance.
+        var role = User.Role();
+        var ownOnly = role == Roles.Sales || (role == Roles.Bill && kind == ReportKinds.Attendance);
 
         var q = new ReportQuery
         {
             Date = day,
-            UserId = User.Role() == Roles.Sales ? User.UserId() : (userId ?? "").Trim(),
+            From = fromDay,
+            To = toDay,
+            UserId = ownOnly ? User.UserId() : (userId ?? "").Trim(),
             DealerId = (dealerId ?? "").Trim(),
             BeatId = (beatId ?? "").Trim(),
             View = (view ?? TargetViews.Daily).Trim().ToLowerInvariant()
         };
 
         var table = await _reports.BuildAsync(kind, q);
-        var fileBase = $"{kind}-{day:yyyy-MM-dd}";
+        var fileBase = kind == ReportKinds.Attendance
+            ? $"{kind}-{fromDay:yyyy-MM-dd}_to_{toDay:yyyy-MM-dd}"
+            : $"{kind}-{day:yyyy-MM-dd}";
 
         return (format ?? "json").ToLowerInvariant() switch
         {
@@ -498,5 +555,13 @@ public sealed class ReportsController : ControllerBase
             "pdf" => File(_exporter.ToPdf(table), "application/pdf", fileBase + ".pdf"),
             _ => Ok(table)
         };
+    }
+
+    private static DateOnly ParseDate(string? text, DateOnly fallback)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return fallback;
+        if (!DateOnly.TryParseExact(text.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+            throw AppException.BadRequest("Dates must be in yyyy-MM-dd format.");
+        return d;
     }
 }

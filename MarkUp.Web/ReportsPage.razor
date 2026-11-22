@@ -23,6 +23,7 @@
                         <option value="@ReportKinds.ProductTarget">Product Target vs Achievement</option>
                         <option value="@ReportKinds.PartyList">Party Name List</option>
                         <option value="@ReportKinds.Products">Product Report</option>
+                        <option value="@ReportKinds.Attendance">Attendance Report</option>
                     </select>
                     <span class="hint">@KindHint</span>
                 </label>
@@ -32,6 +33,18 @@
                     <label class="field">
                         <span class="field-label req">Report date</span>
                         <input type="date" @bind="date" />
+                    </label>
+                }
+
+                @if (kind == ReportKinds.Attendance)
+                {
+                    <label class="field">
+                        <span class="field-label req">From</span>
+                        <input type="date" max="@Fmt.Date(Fmt.Today())" @bind="fromDate" />
+                    </label>
+                    <label class="field">
+                        <span class="field-label req">To</span>
+                        <input type="date" max="@Fmt.Date(Fmt.Today())" @bind="toDate" />
                     </label>
                 }
 
@@ -51,7 +64,28 @@
                     </label>
                 }
 
-                @if (!IsSales && kind != ReportKinds.Products && lookups != null)
+                @if (kind == ReportKinds.Attendance && !OwnOnly && lookups != null)
+                {
+                    <label class="field">
+                        <span class="field-label">Person</span>
+                        <select @bind="userId">
+                            <option value="">Everyone</option>
+                            <optgroup label="Salespeople">
+                                @foreach (var u in lookups.SalesUsers)
+                                {
+                                    <option value="@u.Id">@u.Name</option>
+                                }
+                            </optgroup>
+                            <optgroup label="Billing staff">
+                                @foreach (var u in lookups.BillUsers)
+                                {
+                                    <option value="@u.Id">@u.Name</option>
+                                }
+                            </optgroup>
+                        </select>
+                    </label>
+                }
+                else if (!IsSales && kind != ReportKinds.Products && kind != ReportKinds.Attendance && lookups != null)
                 {
                     <label class="field">
                         <span class="field-label">Salesperson</span>
@@ -127,7 +161,7 @@
                 }
                 <span>PDF</span>
             </button>
-            @if (IsSales)
+            @if (OwnOnly)
             {
                 <span class="muted small" style="margin-left:auto">You see your own data only.</span>
             }
@@ -219,6 +253,8 @@
 @code {
     private string kind = ReportKinds.Dsr;
     private DateOnly date = Fmt.Today();
+    private DateOnly fromDate = new(Fmt.Today().Year, Fmt.Today().Month, 1);
+    private DateOnly toDate = Fmt.Today();
     private string view = TargetViews.Daily;
     private string userId = "";
     private string dealerId = "";
@@ -229,6 +265,9 @@
     private string? busy;
 
     private bool IsSales => Auth.Role == Roles.Sales;
+
+    /// <summary>Sales see only their own data; billing staff see only their own attendance.</summary>
+    private bool OwnOnly => IsSales || (Auth.Role == Roles.Bill && kind == ReportKinds.Attendance);
     private bool NeedsDate => kind is ReportKinds.Dsr or ReportKinds.TargetVsAch or ReportKinds.ProductTarget;
 
     private string KindHint => kind switch
@@ -238,6 +277,7 @@
         ReportKinds.ProductTarget => "Target and billed quantity per product.",
         ReportKinds.PartyList => "All active parties with contact details.",
         ReportKinds.Products => "All active products with rates.",
+        ReportKinds.Attendance => "Sign-in time and location for each day in the range.",
         _ => ""
     };
 
@@ -262,6 +302,7 @@
     {
         table = null;
         error = null;
+        userId = "";
         if (kind == ReportKinds.ProductTarget && view == TargetViews.Overall) view = TargetViews.Monthly;
     }
 
@@ -272,7 +313,12 @@
             "date=" + Fmt.Date(date),
             "view=" + Uri.EscapeDataString(view)
         };
-        if (!IsSales && !string.IsNullOrEmpty(userId)) q.Add("userId=" + Uri.EscapeDataString(userId));
+        if (kind == ReportKinds.Attendance)
+        {
+            q.Add("from=" + Fmt.Date(fromDate));
+            q.Add("to=" + Fmt.Date(toDate));
+        }
+        if (!OwnOnly && !string.IsNullOrEmpty(userId)) q.Add("userId=" + Uri.EscapeDataString(userId));
         if (kind == ReportKinds.PartyList)
         {
             if (!string.IsNullOrEmpty(dealerId)) q.Add("dealerId=" + Uri.EscapeDataString(dealerId));
@@ -282,8 +328,21 @@
         return $"api/reports/{kind}?" + string.Join("&", q);
     }
 
+    /// <summary>Checks the attendance date range before calling the server.</summary>
+    private bool RangeOk()
+    {
+        if (kind != ReportKinds.Attendance) return true;
+        if (fromDate > toDate)
+        {
+            error = "From date must be on or before To date.";
+            return false;
+        }
+        return true;
+    }
+
     private async Task RunAsync()
     {
+        if (!RangeOk()) return;
         busy = "show";
         error = null;
         try
@@ -303,11 +362,15 @@
 
     private async Task ExportAsync(string format)
     {
+        if (!RangeOk()) return;
         busy = format;
         error = null;
         try
         {
-            var file = await Api.DownloadAsync(BuildUrl(format), $"{kind}-{Fmt.Date(date)}.{format}");
+            var fallbackName = kind == ReportKinds.Attendance
+                ? $"{kind}-{Fmt.Date(fromDate)}_to_{Fmt.Date(toDate)}.{format}"
+                : $"{kind}-{Fmt.Date(date)}.{format}";
+            var file = await Api.DownloadAsync(BuildUrl(format), fallbackName);
             await Browser.DownloadAsync(file.FileName, file.ContentType, file.Data);
             Toast.Success($"{file.FileName} downloaded.", format == "pdf" ? "PDF ready" : "Excel ready");
         }

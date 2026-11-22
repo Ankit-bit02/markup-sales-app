@@ -81,6 +81,8 @@ public class LookupItem
 public class LookupsResponse
 {
     public List<LookupItem> SalesUsers { get; set; } = new();
+    /// <summary>Active billing staff (Admin only; empty for others). Used by the Attendance report.</summary>
+    public List<LookupItem> BillUsers { get; set; } = new();
     public List<LookupItem> Dealers { get; set; } = new();
     public List<LookupItem> Beats { get; set; } = new();
     public List<LookupItem> Products { get; set; } = new();
@@ -123,6 +125,8 @@ public class AttendanceRequest
 
     [Range(-180, 180)]
     public double Lng { get; set; }
+    /// <summary>Billing staff only: location was refused or unavailable; the time is still recorded.</summary>
+    public bool NoGps { get; set; }
 }
 
 public class AttendanceResult
@@ -131,7 +135,31 @@ public class AttendanceResult
     public DateOnly Date { get; set; }
     public string LoginTime { get; set; } = "";
     public string LocationName { get; set; } = "";
+    public bool NoGps { get; set; }
     public bool AlreadyMarked { get; set; }
+}
+
+/// <summary>One person's row on the daily attendance page.</summary>
+public class AttendanceRow
+{
+    public string UserId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Role { get; set; } = "";
+    public bool SignedIn { get; set; }
+    public string LoginTime { get; set; } = "";
+    public string LocationName { get; set; } = "";
+    public double? Lat { get; set; }
+    public double? Lng { get; set; }
+    public bool NoGps { get; set; }
+}
+
+public class DailyAttendance
+{
+    public DateOnly Date { get; set; }
+    public string Day { get; set; } = "";
+    public int Total { get; set; }
+    public int SignedIn { get; set; }
+    public List<AttendanceRow> Rows { get; set; } = new();
 }
 
 public class OrderLineRequest

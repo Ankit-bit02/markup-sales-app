@@ -282,6 +282,8 @@ public class Attendance : IEntity
     public double Lat { get; set; }
     public double Lng { get; set; }
     public string LocationName { get; set; } = "";
+    /// <summary>True when the user refused location (billing staff only): time is recorded, Lat/Lng are 0.</summary>
+    public bool NoGps { get; set; }
     public DateTime SyncedAt { get; set; }
 }
 

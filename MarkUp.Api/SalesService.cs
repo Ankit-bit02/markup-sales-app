@@ -91,15 +91,16 @@ public sealed class SalesService
             throw AppException.BadRequest("A valid GPS location is required. Turn on location and try again.");
     }
 
-    public async Task<AttendanceResult> MarkAttendanceAsync(string userId, AttendanceRequest req)
+    public async Task<AttendanceResult> MarkAttendanceAsync(string userId, AttendanceRequest req, bool allowNoGps = false)
     {
         if (string.IsNullOrWhiteSpace(req.Id)) throw AppException.BadRequest("Missing record id.");
-        ValidateLocation(req.Lat, req.Lng);
+        var noGps = allowNoGps && req.NoGps;
+        if (!noGps) ValidateLocation(req.Lat, req.Lng);
         var at = ResolveCapturedAt(req.CapturedAt);
         var date = DateOnly.FromDateTime(at);
 
         // Look up the place name before taking the write lock (it can take a second).
-        var location = await _geo.LocationNameAsync(req.Lat, req.Lng);
+        var location = noGps ? "No GPS" : await _geo.LocationNameAsync(req.Lat, req.Lng);
 
         return await _store.WriteLockedAsync(async () =>
         {
@@ -115,6 +116,7 @@ public sealed class SalesService
                     Date = existing.Date,
                     LoginTime = existing.LoginTime,
                     LocationName = existing.LocationName,
+                    NoGps = existing.NoGps,
                     AlreadyMarked = true
                 };
             }
@@ -126,13 +128,21 @@ public sealed class SalesService
                 Date = date,
                 Day = date.DayOfWeek.ToString(),
                 LoginTime = AppClock.TimeText(at),
-                Lat = req.Lat,
-                Lng = req.Lng,
+                Lat = noGps ? 0 : req.Lat,
+                Lng = noGps ? 0 : req.Lng,
                 LocationName = location,
+                NoGps = noGps,
                 SyncedAt = _clock.Now
             };
             await _store.AddAsync(row);
-            return new AttendanceResult { Id = row.Id, Date = row.Date, LoginTime = row.LoginTime, LocationName = row.LocationName };
+            return new AttendanceResult
+            {
+                Id = row.Id,
+                Date = row.Date,
+                LoginTime = row.LoginTime,
+                LocationName = row.LocationName,
+                NoGps = row.NoGps
+            };
         });
     }
 

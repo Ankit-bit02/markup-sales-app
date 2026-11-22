@@ -46,6 +46,7 @@ builder.Services.AddSingleton<GeocodingService>();
 builder.Services.AddSingleton<AuthService>();
 builder.Services.AddSingleton<MasterData>();
 builder.Services.AddSingleton<SalesService>();
+builder.Services.AddSingleton<AttendanceService>();
 builder.Services.AddSingleton<BillingService>();
 builder.Services.AddSingleton<ReportService>();
 builder.Services.AddSingleton<ReportExporter>();

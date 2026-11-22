@@ -57,6 +57,7 @@ public static class ReportKinds
     public const string Products = "products";
     public const string TargetVsAch = "target-vs-ach";
     public const string ProductTarget = "product-target";
+    public const string Attendance = "attendance";
 }
 
 public static class TargetViews

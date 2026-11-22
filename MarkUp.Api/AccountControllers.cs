@@ -204,6 +204,10 @@ public sealed class LookupsController : ControllerBase
         return Ok(new LookupsResponse
         {
             SalesUsers = salesUsers.OrderBy(u => u.Name).Select(u => new LookupItem { Id = u.Id, Name = u.Name }).ToList(),
+            BillUsers = User.Role() == Roles.Admin
+                ? m.Users.Values.Where(u => u.Role == Roles.Bill && u.IsActive).OrderBy(u => u.Name)
+                    .Select(u => new LookupItem { Id = u.Id, Name = u.Name }).ToList()
+                : new List<LookupItem>(),
             Dealers = dealers.OrderBy(d => d.Name).Select(d => new LookupItem { Id = d.Id, Name = d.Name }).ToList(),
             Beats = beats.OrderBy(b => b.Name).Select(b => new LookupItem { Id = b.Id, Name = b.Name }).ToList(),
             Products = m.Products.Values.Where(p => p.IsActive).OrderBy(p => p.Name)

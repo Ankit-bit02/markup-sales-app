@@ -1,0 +1,205 @@
+﻿@page "/admin/attendance"
+@inject ApiClient Api
+@inject AuthSession Auth
+
+<PageTitle>Attendance - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Daily Attendance" Subtitle="Who signed in on a day, at what time and from where." IconName="clock">
+        <Actions>
+            <button class="btn" disabled="@busy" @onclick="LoadAsync">
+                @if (busy)
+                {
+                    <span class="spinner"></span>
+                }
+                else
+                {
+                    <Icon Name="refresh" />
+                }
+                <span>Refresh</span>
+            </button>
+        </Actions>
+    </PageHeader>
+
+    <div class="card">
+        <div class="toolbar">
+            <button class="btn btn-sm" title="Previous day" @onclick="() => MoveAsync(-1)"><Icon Name="chevron-left" Class="sm" /></button>
+            <input type="date" style="max-width:170px" max="@Fmt.Date(Fmt.Today())" @bind="date" @bind:after="LoadAsync" />
+            <button class="btn btn-sm" title="Next day" disabled="@IsToday" @onclick="() => MoveAsync(1)"><Icon Name="chevron-right" Class="sm" /></button>
+            @if (!IsToday)
+            {
+                <button class="btn btn-ghost btn-sm" @onclick="TodayAsync">Today</button>
+            }
+            <b style="margin-left:6px">@date.ToString("dddd, dd MMM yyyy")</b>
+        </div>
+    </div>
+
+    @if (data != null)
+    {
+        <div class="stats">
+            <div class="stat"><div class="stat-label">People</div><div class="stat-value">@data.Total</div></div>
+            <div class="stat"><div class="stat-label">Signed in</div><div class="stat-value" style="color:var(--success)">@data.SignedIn</div></div>
+            <div class="stat"><div class="stat-label">Not signed in</div><div class="stat-value">@(data.Total - data.SignedIn)</div></div>
+            <div class="stat"><div class="stat-label">No GPS</div><div class="stat-value">@data.Rows.Count(r => r.NoGps)</div></div>
+        </div>
+    }
+
+    <div class="card">
+        <div class="card-header">
+            <h2><Icon Name="users" /> Sign-ins</h2>
+            @if (data != null)
+            {
+                <span class="count">@Visible.Count()</span>
+            }
+        </div>
+        <div class="toolbar">
+            <div class="search input-icon">
+                <Icon Name="search" />
+                <input placeholder="Search name..." @bind="search" @bind:event="oninput" />
+            </div>
+            <select style="max-width:170px" @bind="roleFilter">
+                <option value="">All roles</option>
+                <option value="@Roles.Sales">Salespeople</option>
+                <option value="@Roles.Bill">Billing staff</option>
+            </select>
+            <select style="max-width:170px" @bind="statusFilter">
+                <option value="">Everyone</option>
+                <option value="in">Signed in</option>
+                <option value="out">Not signed in</option>
+            </select>
+        </div>
+
+        <Alert Kind="error" Message="@error" Class="mt-2" />
+
+        @if (data == null && error == null)
+        {
+            <div class="loading"><span class="spinner"></span> Loading...</div>
+        }
+        else if (data != null && !Visible.Any())
+        {
+            <EmptyState IconName="clock" Title="Nobody to show" Text="No one matches these filters for this day." />
+        }
+        else if (data != null)
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr><th>#</th><th>Person</th><th>Role</th><th>Sign-in time</th><th>Location</th><th class="text-right">Map</th></tr>
+                    </thead>
+                    <tbody>
+                        @{
+                            var sn = 1;
+                        }
+                        @foreach (var r in Visible)
+                        {
+                            <tr>
+                                <td class="muted">@(sn++)</td>
+                                <td><b>@r.Name</b></td>
+                                <td><span class="badge badge-role-@r.Role no-dot">@RoleLabel(r.Role)</span></td>
+                                <td>
+                                    @if (r.SignedIn)
+                                    {
+                                        <span class="badge badge-success">@r.LoginTime</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge badge-muted">Not signed in</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (r.NoGps)
+                                    {
+                                        <span class="badge badge-warning">No GPS</span>
+                                    }
+                                    else
+                                    {
+                                        @r.LocationName
+                                    }
+                                </td>
+                                <td class="text-right">
+                                    @if (r.Lat.HasValue && r.Lng.HasValue)
+                                    {
+                                        <a class="btn btn-ghost btn-sm" href="@MapUrl(r)" target="_blank" rel="noopener"><Icon Name="map-pin" Class="sm" /> Open</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">–</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <div class="card-footer">
+            <span class="muted small">For a date range or an Excel/PDF copy, use <a href="reports">Reports → Attendance</a>.</span>
+        </div>
+    </div>
+</RoleGuard>
+
+@code {
+    private DateOnly date = Fmt.Today();
+    private DailyAttendance? data;
+    private string? error;
+    private bool busy;
+    private string search = "";
+    private string roleFilter = "";
+    private string statusFilter = "";
+
+    private bool IsToday => date >= Fmt.Today();
+
+    private IEnumerable<AttendanceRow> Visible => (data?.Rows ?? new List<AttendanceRow>())
+        .Where(r => string.IsNullOrWhiteSpace(search) || r.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase))
+        .Where(r => string.IsNullOrEmpty(roleFilter) || r.Role == roleFilter)
+        .Where(r => statusFilter == "" || (statusFilter == "in") == r.SignedIn);
+
+    private static string RoleLabel(string role) => role switch
+    {
+        Roles.Sales => "Salesperson",
+        Roles.Bill => "Billing",
+        Roles.Admin => "Administrator",
+        _ => role
+    };
+
+    private static string MapUrl(AttendanceRow r) =>
+        FormattableString.Invariant($"https://maps.google.com/?q={r.Lat:0.000000},{r.Lng:0.000000}");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsLoggedIn || Auth.MustChangePassword || Auth.Role != Roles.Admin) return;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (date > Fmt.Today()) date = Fmt.Today();
+        busy = true;
+        error = null;
+        try
+        {
+            data = await Api.GetAsync<DailyAttendance>("api/attendance/daily?date=" + Fmt.Date(date));
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+            data = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task MoveAsync(int days)
+    {
+        date = date.AddDays(days);
+        await LoadAsync();
+    }
+
+    private async Task TodayAsync()
+    {
+        date = Fmt.Today();
+        await LoadAsync();
+    }
+}

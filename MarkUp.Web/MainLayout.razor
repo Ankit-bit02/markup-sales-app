@@ -7,6 +7,7 @@
 @inject ConfirmService Confirm
 @inject ApiClient Api
 @inject TrackingClient Tracking
+@inject ToastService Toast
 
 @if (Auth.IsLoggedIn && !Auth.MustChangePassword)
 {
@@ -26,6 +27,7 @@
                 @if (Auth.Role == Roles.Admin)
                 {
                     <NavLink class="nav-item" href="admin" Match="NavLinkMatch.All"><Icon Name="dashboard" /><span>Dashboard</span></NavLink>
+                    <NavLink class="nav-item" href="admin/attendance"><Icon Name="clock" /><span>Attendance</span></NavLink>
                 }
                 @if (Auth.Role == Roles.Sales)
                 {
@@ -126,6 +128,7 @@ else
     private bool menuOpen;
     private DotNetObjectReference<MainLayout>? selfRef;
     private Timer? timer;
+    private string attendanceCheckedFor = "";
 
     private string RoleLabel => Auth.Role switch
     {
@@ -157,6 +160,65 @@ else
         StateHasChanged();
         await LoadPhotoAsync();
         await Tracking.ResumeAsync();
+        await EnsureBillAttendanceAsync();
+
+    }
+    /// <summary>
+    /// Billing staff: the first sign-in of the day records attendance (time + GPS).
+    /// If location is refused or unavailable the time is still recorded as "No GPS".
+    /// Offline: nothing is saved and it is tried again on the next minute tick.
+    /// </summary>
+    private async Task EnsureBillAttendanceAsync()
+    {
+        if (!Auth.IsLoggedIn || Auth.MustChangePassword || Auth.Role != Roles.Bill) return;
+        var today = Fmt.Date(Fmt.Today());
+        var key = Auth.UserId + "|" + today;
+        if (attendanceCheckedFor == key) return;
+        attendanceCheckedFor = key; // stops a second check starting while this one runs
+
+        try
+        {
+            if (await Sync.GetLocalAttendanceDateAsync() == today) return;
+
+            var me = await Api.GetAsync<AttendanceResult>("api/attendance/me");
+            if (me.AlreadyMarked)
+            {
+                await Sync.SetLocalAttendanceDateAsync(me.Date);
+                return;
+            }
+
+            var capturedAt = Fmt.LocalNow();
+            GeoResult geo;
+            try
+            {
+                geo = await Browser.GetLocationAsync();
+            }
+            catch (Exception)
+            {
+                geo = new GeoResult { Ok = false };
+            }
+
+            var req = new AttendanceRequest
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                CapturedAt = capturedAt,
+                Lat = geo.Ok ? geo.Lat : 0,
+                Lng = geo.Ok ? geo.Lng : 0,
+                NoGps = !geo.Ok
+            };
+            var res = await Api.PostAsync<AttendanceResult>("api/attendance", req);
+            await Sync.SetLocalAttendanceDateAsync(res.Date);
+            if (!res.AlreadyMarked)
+            {
+                Toast.Success(res.NoGps
+                    ? $"Attendance marked at {res.LoginTime} without location (location was not allowed)."
+                    : $"Attendance marked at {res.LoginTime}.", "Good morning");
+            }
+        }
+        catch (Exception)
+        {
+            attendanceCheckedFor = ""; // e.g. offline: try again on the next tick
+        }
     }
 
     /// <summary>Loads the signed-in user's profile picture once per sign-in (shown in the menu).</summary>
@@ -184,6 +246,7 @@ else
             StateHasChanged();
         }
         if (online && Auth.Role == Roles.Sales) await Sync.SyncAsync();
+        if (online) await EnsureBillAttendanceAsync();
     }
 
     [JSInvokable]
@@ -192,6 +255,7 @@ else
         online = true;
         StateHasChanged();
         if (Auth.Role == Roles.Sales) await Sync.SyncAsync();
+        await EnsureBillAttendanceAsync();
     }
 
     private void OpenMenu() => menuOpen = true;
@@ -229,10 +293,18 @@ else
 
     private void OnAuthChanged() => _ = InvokeAsync(async () =>
     {
-        if (!Auth.IsLoggedIn) photoUserId = "";
+        if (!Auth.IsLoggedIn)
+        {
+            photoUserId = "";
+            attendanceCheckedFor = "";
+        }
         StateHasChanged();
         await LoadPhotoAsync();
-        if (Auth.IsLoggedIn && !Auth.MustChangePassword) await Tracking.ResumeAsync();
+        if (Auth.IsLoggedIn && !Auth.MustChangePassword)
+        {
+            await Tracking.ResumeAsync();
+            await EnsureBillAttendanceAsync();
+        }
     });
 
     public void Dispose()
