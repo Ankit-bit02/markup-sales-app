@@ -477,6 +477,108 @@ public sealed class SheetStore
         _tables[tab] = new Table { Header = table.Header, Rows = newRows, LoadedAtUtc = table.LoadedAtUtc };
     }
 
+    // ------------------------------------------------------------------ Raw tabs (location tracking: one tab per day)
+    // These tabs are not cached and not part of TableRegistry. Rows are plain text values.
+
+    private readonly ConcurrentDictionary<string, bool> _rawTabs = new();
+    private readonly SemaphoreSlim _rawTabLock = new(1, 1);
+
+    /// <summary>Appends rows to a tab, creating it (small, with a header row) the first time.</summary>
+    public async Task AppendRawAsync(string tab, IReadOnlyList<string> header, IReadOnlyList<IList<object>> rows)
+    {
+        if (rows.Count == 0) return;
+        await EnsureRawTabAsync(tab, header);
+        var body = new ValueRange { Values = rows.ToList() };
+        var req = _service.Spreadsheets.Values.Append(body, _spreadsheetId, $"'{tab}'!A1");
+        req.ValueInputOption = SpreadsheetsResource.ValuesResource.AppendRequest.ValueInputOptionEnum.RAW;
+        req.InsertDataOption = SpreadsheetsResource.ValuesResource.AppendRequest.InsertDataOptionEnum.INSERTROWS;
+        await req.ExecuteAsync();
+    }
+
+    /// <summary>All data rows of a tab (without the header). Empty when the tab does not exist.</summary>
+    public async Task<List<string[]>> ReadRawAsync(string tab, int columns)
+    {
+        if (!await RawTabExistsAsync(tab)) return new List<string[]>();
+        var resp = await _service.Spreadsheets.Values.Get(_spreadsheetId, $"'{tab}'!A2:{ColumnLetter(columns)}").ExecuteAsync();
+        var list = new List<string[]>();
+        foreach (var r in resp.Values ?? new List<IList<object>>())
+        {
+            var row = new string[columns];
+            for (var i = 0; i < columns; i++)
+                row[i] = i < r.Count ? Convert.ToString(r[i], CultureInfo.InvariantCulture) ?? "" : "";
+            list.Add(row);
+        }
+        return list;
+    }
+
+    /// <summary>Titles of all tabs that start with the prefix.</summary>
+    public async Task<List<string>> ListTabsAsync(string prefix)
+    {
+        var ss = await _service.Spreadsheets.Get(_spreadsheetId).ExecuteAsync();
+        return (ss.Sheets ?? new List<Sheet>())
+            .Select(s => s.Properties.Title)
+            .Where(t => t.StartsWith(prefix, StringComparison.Ordinal))
+            .ToList();
+    }
+
+    public async Task DeleteTabsAsync(IReadOnlyCollection<string> titles)
+    {
+        if (titles.Count == 0) return;
+        var ss = await _service.Spreadsheets.Get(_spreadsheetId).ExecuteAsync();
+        var requests = (ss.Sheets ?? new List<Sheet>())
+            .Where(s => titles.Contains(s.Properties.Title))
+            .Select(s => new Request { DeleteSheet = new DeleteSheetRequest { SheetId = s.Properties.SheetId } })
+            .ToList();
+        if (requests.Count == 0) return;
+        await _service.Spreadsheets.BatchUpdate(new BatchUpdateSpreadsheetRequest { Requests = requests }, _spreadsheetId).ExecuteAsync();
+        foreach (var t in titles) _rawTabs.TryRemove(t, out _);
+    }
+
+    private async Task<bool> RawTabExistsAsync(string tab)
+    {
+        if (_rawTabs.ContainsKey(tab)) return true;
+        var ss = await _service.Spreadsheets.Get(_spreadsheetId).ExecuteAsync();
+        var exists = ss.Sheets?.Any(s => s.Properties.Title == tab) ?? false;
+        if (exists) _rawTabs[tab] = true;
+        return exists;
+    }
+
+    private async Task EnsureRawTabAsync(string tab, IReadOnlyList<string> header)
+    {
+        if (_rawTabs.ContainsKey(tab)) return;
+        await _rawTabLock.WaitAsync();
+        try
+        {
+            if (await RawTabExistsAsync(tab)) return;
+
+            // Keep the grid small: every cell of every tab counts towards Google's 10 million cell limit.
+            var add = new Request
+            {
+                AddSheet = new AddSheetRequest
+                {
+                    Properties = new SheetProperties
+                    {
+                        Title = tab,
+                        GridProperties = new GridProperties { RowCount = 2, ColumnCount = header.Count, FrozenRowCount = 1 }
+                    }
+                }
+            };
+            await _service.Spreadsheets.BatchUpdate(new BatchUpdateSpreadsheetRequest { Requests = new List<Request> { add } }, _spreadsheetId)
+                .ExecuteAsync();
+
+            var body = new ValueRange { Values = new List<IList<object>> { header.Cast<object>().ToList() } };
+            var upd = _service.Spreadsheets.Values.Update(body, _spreadsheetId, $"'{tab}'!A1");
+            upd.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.RAW;
+            await upd.ExecuteAsync();
+
+            _rawTabs[tab] = true;
+            _logger.LogInformation("Created tracking tab {Tab}.", tab);
+        }
+        finally
+        {
+            _rawTabLock.Release();
+        }
+    }
     private static void EnsureInLock()
     {
         if (!InWriteLock.Value)

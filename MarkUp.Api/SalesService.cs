@@ -261,6 +261,15 @@ public sealed class SalesService
             };
             await _store.AddAsync(visit);
 
+            // Remember the shop's GPS from its first visit (Admin can correct it on the Parties page).
+            var storedParty = await _store.FindAsync<Party>(party.Id);
+            if (storedParty != null && (storedParty.Lat == null || storedParty.Lng == null))
+            {
+                storedParty.Lat = Math.Round(req.Lat, 6);
+                storedParty.Lng = Math.Round(req.Lng, 6);
+                await _store.UpdateAsync(storedParty);
+            }
+
             return BuildResult(visit, productive ? order : null, party, user, beat, m, orderItems, false);
         });
     }

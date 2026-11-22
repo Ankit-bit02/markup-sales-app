@@ -114,6 +114,13 @@ public class Party : IEntity, IActivatable
     [Required(ErrorMessage = "Select a beat.")]
     public string BeatId { get; set; } = "";
 
+    /// <summary>Shop GPS. Saved from the first visit; Admin can correct it. Empty = unknown.</summary>
+    [Range(-90, 90, ErrorMessage = "Latitude must be between -90 and 90.")]
+    public double? Lat { get; set; }
+
+    [Range(-180, 180, ErrorMessage = "Longitude must be between -180 and 180.")]
+    public double? Lng { get; set; }
+
     public bool IsActive { get; set; } = true;
 }
 

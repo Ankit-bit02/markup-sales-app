@@ -364,3 +364,123 @@ public class ProductImportResult
     public List<string> MappedColumns { get; set; } = new();
     public List<ProductImportRow> Rows { get; set; } = new();
 }
+
+
+// ---------------------------------------------------------------- Location tracking
+
+public static class TrackKinds
+{
+    public const string Start = "Start";
+    public const string Point = "Point";
+    public const string End = "End";
+
+    public static bool IsValid(string? k) => k is Start or Point or End;
+}
+
+public class TrackPointRequest
+{
+    /// <summary>Client-generated id, echoed back so the phone can remove sent points.</summary>
+    [Required, StringLength(64)]
+    public string Id { get; set; } = "";
+
+    [Required, StringLength(10)]
+    public string Kind { get; set; } = TrackKinds.Point;
+
+    /// <summary>Local (Nepal) time on the phone when the point was taken.</summary>
+    public DateTime CapturedAt { get; set; }
+
+    public double Lat { get; set; }
+    public double Lng { get; set; }
+
+    /// <summary>GPS accuracy in metres (smaller is better).</summary>
+    public double Accuracy { get; set; }
+
+    [StringLength(40)]
+    public string BeatId { get; set; } = "";
+}
+
+public class TrackUploadRequest
+{
+    [Required, MaxLength(500)]
+    public List<TrackPointRequest> Points { get; set; } = new();
+}
+
+public class TrackUploadResult
+{
+    /// <summary>Ids the server has handled (saved, or dropped as invalid). The phone removes these.</summary>
+    public List<string> DoneIds { get; set; } = new();
+    public int Saved { get; set; }
+    public int Dropped { get; set; }
+}
+
+public class LiveLocation
+{
+    public string UserId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Phone { get; set; } = "";
+    public string BeatNames { get; set; } = "";
+    public bool HasLocation { get; set; }
+    public double Lat { get; set; }
+    public double Lng { get; set; }
+    public double Accuracy { get; set; }
+    public string LastSeen { get; set; } = "";
+    public int MinutesAgo { get; set; }
+
+    /// <summary>Started the beat and sent a point in the last 10 minutes.</summary>
+    public bool IsTracking { get; set; }
+    public bool AttendanceToday { get; set; }
+    public int VisitsToday { get; set; }
+    public int OrdersToday { get; set; }
+}
+
+public class RoutePoint
+{
+    public string Time { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public double Lat { get; set; }
+    public double Lng { get; set; }
+    public double Accuracy { get; set; }
+}
+
+public class RouteStop
+{
+    public string Time { get; set; } = "";
+    public double Lat { get; set; }
+    public double Lng { get; set; }
+    public string PartyName { get; set; } = "";
+    public bool IsProductive { get; set; }
+    public string OrderNo { get; set; } = "";
+    public decimal OrderValue { get; set; }
+    public string NoOrderReason { get; set; } = "";
+}
+
+public class RouteParty
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Address { get; set; } = "";
+    public string BeatName { get; set; } = "";
+    public double? Lat { get; set; }
+    public double? Lng { get; set; }
+    public bool Visited { get; set; }
+}
+
+public class RouteView
+{
+    public string UserId { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public DateOnly Date { get; set; }
+    public string BeatNames { get; set; } = "";
+    public string AttendanceTime { get; set; } = "";
+    public double? AttendanceLat { get; set; }
+    public double? AttendanceLng { get; set; }
+    public List<RoutePoint> Points { get; set; } = new();
+    public List<RouteStop> Stops { get; set; } = new();
+    public List<RouteParty> Parties { get; set; } = new();
+    public decimal DistanceKm { get; set; }
+    public string FirstTime { get; set; } = "";
+    public string LastTime { get; set; } = "";
+
+    /// <summary>Minutes between consecutive points that are close enough to count as tracked (gaps excluded).</summary>
+    public int TrackedMinutes { get; set; }
+}

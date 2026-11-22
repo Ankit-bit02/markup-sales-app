@@ -6,6 +6,7 @@
 @inject AuthSession Auth
 @inject ToastService Toast
 @inject ConfirmService Confirm
+@inject TrackingClient Tracking
 
 <PageTitle>Market Visit - MARK_UP</PageTitle>
 
@@ -58,6 +59,61 @@
             </div>
         }
     </div>
+    @* ---------------- Beat tracking ---------------- *@
+    @if (attOk && boot != null && boot.Beats.Count > 0)
+    {
+        <div class='card track-card @(Tracking.IsTracking ? "on" : "")'>
+            <div class="status-card">
+                @if (Tracking.IsTracking)
+                {
+                    <span class="status-icon ok"><span class="pulse-dot"></span></span>
+                    <div class="status-text">
+                        <b>Beat tracking is on</b>
+                        <span>
+                            Since @(Tracking.StartedAt?.ToString("HH:mm")) · last point @(Tracking.LastPointAt?.ToString("HH:mm") ?? "–")
+                            @if (Tracking.Waiting > 0)
+                            {
+                                <text> · @Tracking.Waiting waiting to send</text>
+                            }
+                        </span>
+                    </div>
+                    <button class="btn btn-outline-danger" disabled="@trackBusy" @onclick="EndBeatAsync"><Icon Name="x-circle" /> End beat</button>
+                }
+                else
+                {
+                    <span class="status-icon info"><Icon Name="route" Class="lg" /></span>
+                    <div class="status-text">
+                        <b>Start your beat</b>
+                        <span>Your route is recorded while this app is open, until you tap End beat.</span>
+                    </div>
+                    <button class="btn btn-primary" disabled="@trackBusy" @onclick="StartBeatAsync">
+                        @if (trackBusy)
+                        {
+                            <span class="spinner"></span>
+                        }
+                        else
+                        {
+                            <Icon Name="route" />
+                        }
+                        <span>Start beat</span>
+                    </button>
+                }
+            </div>
+            @if (Tracking.IsTracking)
+            {
+                <div style="padding:0 18px 14px">
+                    <Alert Kind="warning" Class="compact" Message="@Tracking.LastError" />
+                    <Alert Kind="info" Class="compact mb-0">
+                        Keep this app open on screen. Tracking pauses when the phone is locked or you switch to another app.
+                        @if (!Tracking.WakeLockOk)
+                        {
+                            <b> This phone cannot keep the screen on by itself; turn off auto screen lock during your beat.</b>
+                        }
+                    </Alert>
+                </div>
+            }
+        </div>
+    }
 
     @* ---------------- Orders ready to share ---------------- *@
     @foreach (var r in results.Where(r => r.Productive))
@@ -428,6 +484,8 @@
     {
         if (!Auth.IsLoggedIn || Auth.Role != Roles.Sales || Auth.MustChangePassword) return;
         Sync.Changed += OnSyncChanged;
+        Tracking.Changed += OnTrackingChanged;
+        await Tracking.ResumeAsync();
         await LoadBootAsync();
         await RefreshQueueAsync();
         await EnsureAttendanceAsync();
@@ -665,9 +723,58 @@
         });
     }
 
+    // ------------------------------------------------------------------ Beat tracking
+
+    private bool trackBusy;
+
+    private async Task StartBeatAsync()
+    {
+        if (boot == null || boot.Beats.Count == 0) return;
+        if (!await Tracking.HasConsentAsync())
+        {
+            var agreed = await Confirm.AskAsync("Start beat tracking?",
+                "While tracking is on, your location is recorded about every minute and shown to the office, until you tap End beat. It is not recorded at any other time.",
+                "I agree, start");
+            if (!agreed) return;
+            await Tracking.SaveConsentAsync();
+        }
+
+        trackBusy = true;
+        try
+        {
+            var beat = string.IsNullOrEmpty(beatId) ? boot.Beats[0].Id : beatId;
+            var err = await Tracking.StartAsync(beat);
+            if (err != null) Toast.Error(err, "Could not start tracking");
+            else Toast.Success("Your route is being recorded. Keep this app open.", "Beat started");
+        }
+        finally
+        {
+            trackBusy = false;
+        }
+    }
+
+    private async Task EndBeatAsync()
+    {
+        var ok = await Confirm.AskAsync("End beat?", "Location tracking will stop. You can start again later today if needed.", "End beat");
+        if (!ok) return;
+        trackBusy = true;
+        try
+        {
+            await Tracking.StopAsync();
+            Toast.Info("Beat ended. Tracking is off.");
+        }
+        finally
+        {
+            trackBusy = false;
+        }
+    }
+
+    private void OnTrackingChanged() => _ = InvokeAsync(StateHasChanged);
+
     public void Dispose()
     {
         Sync.Changed -= OnSyncChanged;
+        Tracking.Changed -= OnTrackingChanged;
     }
 }
 }

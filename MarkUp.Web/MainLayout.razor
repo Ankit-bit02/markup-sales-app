@@ -6,6 +6,7 @@
 @inject Browser Browser
 @inject ConfirmService Confirm
 @inject ApiClient Api
+@inject TrackingClient Tracking
 
 @if (Auth.IsLoggedIn && !Auth.MustChangePassword)
 {
@@ -33,6 +34,10 @@
                 @if (Auth.IsInRole(Roles.Admin, Roles.Bill))
                 {
                     <NavLink class="nav-item" href="billing"><Icon Name="receipt" /><span>Orders &amp; Billing</span></NavLink>
+                }
+                @if (Auth.Role == Roles.Admin)
+                {
+                    <NavLink class="nav-item" href="admin/live-map"><Icon Name="map" /><span>Live Map</span></NavLink>
                 }
                 <NavLink class="nav-item" href="reports"><Icon Name="chart" /><span>Reports</span></NavLink>
 
@@ -77,6 +82,10 @@
                 @if (!online)
                 {
                     <span class="badge badge-warning">Offline</span>
+                }
+                @if (Tracking.IsTracking)
+                {
+                    <a class="badge badge-success track-badge" href="sales" title="Beat tracking is on"><span class="pulse-dot sm"></span> Tracking</a>
                 }
                 <span class="badge badge-role-@Auth.Role no-dot">@RoleLabel</span>
                 <a class="topbar-user" href="profile" title="My Profile">
@@ -130,7 +139,10 @@ else
     {
         Auth.Changed += OnAuthChanged;
         Nav.LocationChanged += OnLocationChanged;
+        Tracking.Changed += OnTrackingChanged;
     }
+
+    private void OnTrackingChanged() => _ = InvokeAsync(StateHasChanged);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -144,6 +156,7 @@ else
         timer = new Timer(_ => InvokeAsync(TickAsync), null, TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(60));
         StateHasChanged();
         await LoadPhotoAsync();
+        await Tracking.ResumeAsync();
     }
 
     /// <summary>Loads the signed-in user's profile picture once per sign-in (shown in the menu).</summary>
@@ -209,6 +222,7 @@ else
         }
 
         menuOpen = false;
+        if (Auth.Role == Roles.Sales) await Tracking.SignOutAsync();
         await Auth.ClearAsync();
         Nav.NavigateTo("login", replace: true);
     }
@@ -218,11 +232,13 @@ else
         if (!Auth.IsLoggedIn) photoUserId = "";
         StateHasChanged();
         await LoadPhotoAsync();
+        if (Auth.IsLoggedIn && !Auth.MustChangePassword) await Tracking.ResumeAsync();
     });
 
     public void Dispose()
     {
         Auth.Changed -= OnAuthChanged;
+        Tracking.Changed -= OnTrackingChanged;
         Nav.LocationChanged -= OnLocationChanged;
         timer?.Dispose();
         selfRef?.Dispose();

@@ -38,6 +38,9 @@ public class AppOptions
     public int LockoutMinutes { get; set; } = 15;
     /// <summary>How many days back an offline record may be dated when it syncs.</summary>
     public int MaxOfflineDays { get; set; } = 7;
+
+    /// <summary>Location tracking points older than this are deleted automatically.</summary>
+    public int TrackingRetentionDays { get; set; } = 90;
 }
 
 public class SeedOptions

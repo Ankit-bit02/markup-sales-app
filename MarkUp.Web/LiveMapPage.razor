@@ -1,0 +1,398 @@
+﻿@page "/admin/live-map"
+@implements IAsyncDisposable
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject IJSRuntime JS
+@inject ToastService Toast
+
+<PageTitle>Live Map - MARK_UP</PageTitle>
+
+<RoleGuard Allow="@Roles.Admin">
+    <PageHeader Title="Live Map" Subtitle="Where salespeople are now, and the route they took on any day." IconName="map">
+        <Actions>
+            @if (tab == "live")
+            {
+                <label class="check small"><input type="checkbox" @bind="autoRefresh" /> Auto refresh (1 min)</label>
+                <button class="btn" disabled="@busy" @onclick="() => LoadLiveAsync(fitAll: false)">
+                    @if (busy)
+                    {
+                        <span class="spinner"></span>
+                    }
+                    else
+                    {
+                        <Icon Name="refresh" />
+                    }
+                    <span>Refresh</span>
+                </button>
+            }
+        </Actions>
+    </PageHeader>
+
+    <div class="tabs">
+        <button class='@(tab == "live" ? "active" : "")' @onclick='() => SwitchTabAsync("live")'><Icon Name="map-pin" Class="sm" /> Live now</button>
+        <button class='@(tab == "route" ? "active" : "")' @onclick='() => SwitchTabAsync("route")'><Icon Name="route" Class="sm" /> Route by day</button>
+    </div>
+
+    <Alert Kind="error" Message="@error" />
+    @if (!mapReady && mapTried)
+    {
+        <Alert Kind="warning" Title="Map could not load">The map library is missing. Check that <b>wwwroot/lib/leaflet</b> exists and reload the page.</Alert>
+    }
+
+    <div class="map-layout">
+        <div class="card map-card">
+            <div id="@MapId" class="map-box"></div>
+            <div class="map-legend">
+                @if (tab == "live")
+                {
+                    <span><i class="lg-dot live"></i> Tracking now</span>
+                    <span><i class="lg-dot recent"></i> Seen in last 30 min</span>
+                    <span><i class="lg-dot stale"></i> Older</span>
+                }
+                else
+                {
+                    <span><i class="lg-line"></i> Route</span>
+                    <span><i class="lg-line gap"></i> Not tracked (app closed)</span>
+                    <span><i class="lg-dot stop"></i> Order</span>
+                    <span><i class="lg-dot noorder"></i> No order</span>
+                    <span><i class="lg-dot shop"></i> Shop not visited</span>
+                }
+            </div>
+        </div>
+
+        <div class="map-side">
+            @if (tab == "live")
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <h3><Icon Name="users" /> Salespeople</h3>
+                        @if (live != null)
+                        {
+                            <span class="count">@live.Count(p => p.IsTracking) tracking</span>
+                        }
+                        <span class="spacer"></span>
+                        @if (lastLoaded != null)
+                        {
+                            <span class="muted small">Updated @lastLoaded</span>
+                        }
+                    </div>
+                    @if (live == null)
+                    {
+                        <div class="loading"><span class="spinner"></span> Loading...</div>
+                    }
+                    else if (live.Count == 0)
+                    {
+                        <EmptyState IconName="users" Title="No salespeople" Text="Add Sales users on the Users page." />
+                    }
+                    else
+                    {
+                        <div class="people-list">
+                            @foreach (var p in live)
+                            {
+                                <div class="person" @key="p.UserId">
+                                    <span class='avatar @(p.IsTracking ? "" : "light")'>@Initials(p.Name)</span>
+                                    <div class="person-text">
+                                        <b>@p.Name</b>
+                                        <div class="small">
+                                            @if (p.IsTracking)
+                                            {
+                                                <span class="badge badge-success">Tracking</span>
+                                            }
+                                            else if (p.HasLocation)
+                                            {
+                                                <span class="badge badge-muted">Seen @p.LastSeen · @Ago(p.MinutesAgo)</span>
+                                            }
+                                            else if (p.AttendanceToday)
+                                            {
+                                                <span class="badge badge-warning">Beat not started</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge badge-muted">No attendance today</span>
+                                            }
+                                        </div>
+                                        <div class="muted small">
+                                            @(string.IsNullOrEmpty(p.BeatNames) ? "No beat" : p.BeatNames) · @p.VisitsToday visit(s), @p.OrdersToday order(s)
+                                        </div>
+                                    </div>
+                                    <div class="person-actions">
+                                        @if (p.HasLocation)
+                                        {
+                                            <button class="btn btn-sm btn-icon" title="Show on map" @onclick="() => FocusAsync(p)"><Icon Name="map-pin" Class="sm" /></button>
+                                        }
+                                        <button class="btn btn-sm" title="Today's route" @onclick="() => OpenRouteAsync(p.UserId)"><Icon Name="route" Class="sm" /> Route</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                <p class="muted small">Locations are recorded only while a salesperson has started the beat and keeps the app open.</p>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-body">
+                        <div class="stack" style="gap:12px">
+                            <label class="field">
+                                <span class="field-label req">Salesperson</span>
+                                <select @bind="routeUserId">
+                                    <option value="">Select salesperson</option>
+                                    @foreach (var u in salesUsers)
+                                    {
+                                        <option value="@u.Id">@u.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span class="field-label req">Date</span>
+                                <input type="date" @bind="routeDate" max="@Fmt.Date(Fmt.Today())" />
+                            </label>
+                            <button class="btn btn-primary" disabled="@(busy || string.IsNullOrEmpty(routeUserId))" @onclick="LoadRouteAsync">
+                                @if (busy)
+                                {
+                                    <span class="spinner"></span>
+                                }
+                                else
+                                {
+                                    <Icon Name="route" />
+                                }
+                                <span>Show route</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                @if (route != null)
+                {
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><Icon Name="user" /> @route.UserName</h3>
+                            <span class="spacer"></span>
+                            <span class="muted small">@Fmt.Date(route.Date)</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="report-meta">
+                                <div class="meta-chip highlight"><span>Distance</span><b>@route.DistanceKm km</b></div>
+                                <div class="meta-chip"><span>Tracked</span><b>@Hours(route.TrackedMinutes)</b></div>
+                                <div class="meta-chip"><span>From</span><b>@(string.IsNullOrEmpty(route.FirstTime) ? "–" : route.FirstTime)</b></div>
+                                <div class="meta-chip"><span>To</span><b>@(string.IsNullOrEmpty(route.LastTime) ? "–" : route.LastTime)</b></div>
+                                <div class="meta-chip"><span>Visits</span><b>@route.Stops.Count</b></div>
+                                <div class="meta-chip"><span>Orders</span><b>@route.Stops.Count(s => s.IsProductive)</b></div>
+                                <div class="meta-chip"><span>Attendance</span><b>@(string.IsNullOrEmpty(route.AttendanceTime) ? "–" : route.AttendanceTime)</b></div>
+                            </div>
+                            @if (!string.IsNullOrEmpty(route.BeatNames))
+                            {
+                                <p class="muted small mt-1 mb-0">Beat: @route.BeatNames</p>
+                            }
+                            @if (route.Points.Count == 0)
+                            {
+                                <Alert Kind="info" Class="compact mt-2 mb-0">No route recorded for this day: the beat was not started, or the app was closed. Visits are still shown.</Alert>
+                            }
+                            @if (ShopsWithoutGps > 0)
+                            {
+                                <p class="muted small mt-1 mb-0">@ShopsWithoutGps shop(s) of this beat have no GPS yet; they appear after their first visit.</p>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><Icon Name="store" /> Visits</h3>
+                            <span class="count">@route.Stops.Count</span>
+                        </div>
+                        @if (route.Stops.Count == 0)
+                        {
+                            <EmptyState IconName="store" Title="No visits" Text="No shop visits were saved on this day." />
+                        }
+                        else
+                        {
+                            <div class="people-list">
+                                @for (var i = 0; i < route.Stops.Count; i++)
+                                {
+                                    var stop = route.Stops[i];
+                                    var index = i;
+                                    <div class="person stop-row" @onclick="() => FocusStopAsync(index, stop)">
+                                        <span class='stop-no @(stop.IsProductive ? "ok" : "no")'>@(i + 1)</span>
+                                        <div class="person-text">
+                                            <b>@stop.PartyName</b>
+                                            <div class="muted small">
+                                                @stop.Time ·
+                                                @if (stop.IsProductive)
+                                                {
+                                                    <text>Order @stop.OrderNo · NPR @Fmt.Money(stop.OrderValue)</text>
+                                                }
+                                                else
+                                                {
+                                                    <text>No order: @stop.NoOrderReason</text>
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</RoleGuard>
+
+@code {
+    private const string MapId = "mk-map";
+
+    private string tab = "live";
+    private bool mapReady;
+    private bool mapTried;
+    private bool busy;
+    private string? error;
+
+    private List<LiveLocation>? live;
+    private string? lastLoaded;
+    private bool autoRefresh = true;
+    private Timer? timer;
+
+    private List<UserDto> salesUsers = new();
+    private string routeUserId = "";
+    private DateOnly routeDate = Fmt.Today();
+    // Fully qualified: Blazor also has a component called RouteView.
+    private MarkUp.Shared.RouteView? route;
+
+    private int ShopsWithoutGps => route?.Parties.Count(p => p.Lat == null) ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsInRole(Roles.Admin)) return;
+        try
+        {
+            salesUsers = (await Api.GetAsync<List<UserDto>>("api/users"))
+                .Where(u => u.Role == Roles.Sales && u.IsActive).OrderBy(u => u.Name).ToList();
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !Auth.IsInRole(Roles.Admin)) return;
+        mapReady = await JS.InvokeAsync<bool>("markup.mapInit", MapId);
+        mapTried = true;
+        await LoadLiveAsync(fitAll: true);
+        timer = new Timer(_ => InvokeAsync(async () =>
+        {
+            if (autoRefresh && tab == "live" && !busy) await LoadLiveAsync(fitAll: false);
+        }), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
+
+    private async Task SwitchTabAsync(string next)
+    {
+        if (tab == next) return;
+        tab = next;
+        error = null;
+        if (tab == "live") await LoadLiveAsync(fitAll: true);
+        else if (route != null) await DrawRouteAsync();
+        else if (mapReady) await JS.InvokeVoidAsync("markup.mapShowLive", MapId, new List<LiveLocation>(), false);
+    }
+
+    private async Task LoadLiveAsync(bool fitAll)
+    {
+        busy = true;
+        StateHasChanged();
+        try
+        {
+            live = await Api.GetAsync<List<LiveLocation>>("api/tracking/live");
+            live = live.OrderByDescending(p => p.IsTracking).ThenByDescending(p => p.HasLocation).ThenBy(p => p.Name).ToList();
+            lastLoaded = DateTime.Now.ToString("HH:mm");
+            error = null;
+            if (mapReady && tab == "live") await JS.InvokeVoidAsync("markup.mapShowLive", MapId, live, fitAll);
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task FocusAsync(LiveLocation p)
+    {
+        if (mapReady) await JS.InvokeVoidAsync("markup.mapFocus", MapId, p.UserId, p.Lat, p.Lng);
+    }
+
+    private async Task OpenRouteAsync(string userId)
+    {
+        routeUserId = userId;
+        routeDate = Fmt.Today();
+        tab = "route";
+        await LoadRouteAsync();
+    }
+
+    private async Task LoadRouteAsync()
+    {
+        if (string.IsNullOrEmpty(routeUserId)) return;
+        busy = true;
+        error = null;
+        try
+        {
+            route = await Api.GetAsync<MarkUp.Shared.RouteView>($"api/tracking/route?userId={Uri.EscapeDataString(routeUserId)}&date={Fmt.Date(routeDate)}");
+            await DrawRouteAsync();
+            if (route.Points.Count == 0 && route.Stops.Count == 0)
+                Toast.Info($"{route.UserName} has no route or visits on {Fmt.Date(routeDate)}.");
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task DrawRouteAsync()
+    {
+        if (mapReady && route != null) await JS.InvokeVoidAsync("markup.mapShowRoute", MapId, route);
+    }
+
+    private async Task FocusStopAsync(int index, RouteStop stop)
+    {
+        if (mapReady && (stop.Lat != 0 || stop.Lng != 0))
+            await JS.InvokeVoidAsync("markup.mapFocus", MapId, $"stop-{index}", stop.Lat, stop.Lng);
+    }
+
+    private static string Ago(int minutes)
+    {
+        if (minutes >= 60) return $"{minutes / 60} h {minutes % 60} min ago";
+        if (minutes >= 1) return $"{minutes} min ago";
+        return "just now";
+    }
+
+    private static string Hours(int minutes) =>
+        minutes >= 60 ? $"{minutes / 60} h {minutes % 60} min" : $"{minutes} min";
+
+    private static string Initials(string name)
+    {
+        var parts = (name ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        var first = char.ToUpperInvariant(parts[0][0]);
+        return parts.Length > 1 ? $"{first}{char.ToUpperInvariant(parts[^1][0])}" : first.ToString();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        timer?.Dispose();
+        try
+        {
+            await JS.InvokeVoidAsync("markup.mapDestroy", MapId);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+}

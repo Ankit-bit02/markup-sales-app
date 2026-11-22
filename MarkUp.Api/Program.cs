@@ -49,6 +49,8 @@ builder.Services.AddSingleton<SalesService>();
 builder.Services.AddSingleton<BillingService>();
 builder.Services.AddSingleton<ReportService>();
 builder.Services.AddSingleton<ReportExporter>();
+builder.Services.AddSingleton<TrackingService>();
+builder.Services.AddHostedService<TrackingCleanupService>();
 
 builder.Services.AddHttpClient(GeocodingService.HttpClientName, c =>
 {

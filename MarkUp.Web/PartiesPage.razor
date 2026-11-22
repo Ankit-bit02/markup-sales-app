@@ -27,6 +27,7 @@
             <th>Type</th>
             <th>Contact</th>
             <th>Address</th>
+            <th>GPS</th>
         </HeaderCells>
         <RowCells Context="p">
             <td class="cell-title">@p.Name</td>
@@ -40,6 +41,16 @@
                 }
             </td>
             <td>@p.Address</td>
+            <td>
+                @if (p.Lat != null && p.Lng != null)
+                {
+                    <a class="badge badge-success no-dot" href="@Fmt.MapLink(p.Lat.Value, p.Lng.Value)" target="_blank" rel="noopener" title="Open in Google Maps">GPS <Icon Name="external" Class="sm" /></a>
+                }
+                else
+                {
+                    <span class="badge badge-muted no-dot" title="Saved automatically at the first visit">Not yet</span>
+                }
+            </td>
         </RowCells>
         <FormFields Context="p">
             <label class="field full">
@@ -82,6 +93,21 @@
                 <span class="field-label">Address</span>
                 <InputText @bind-Value="p.Address" />
             </label>
+            <div class="section-title full">Shop location (GPS)</div>
+            <label class="field">
+                <span class="field-label">Latitude</span>
+                <InputNumber @bind-Value="p.Lat" step="any" placeholder="e.g. 27.717245" />
+                <ValidationMessage For="() => p.Lat" />
+            </label>
+            <label class="field">
+                <span class="field-label">Longitude</span>
+                <InputNumber @bind-Value="p.Lng" step="any" placeholder="e.g. 85.323961" />
+                <ValidationMessage For="() => p.Lng" />
+            </label>
+            <span class="hint full">
+                Filled automatically at the shop's first visit. To correct it: in Google Maps, long-press the shop,
+                copy the two numbers shown (latitude, longitude) and paste them here. Leave both empty to capture it again at the next visit.
+            </span>
         </FormFields>
     </MasterList>
 </RoleGuard>

@@ -17,6 +17,7 @@ builder.Services.AddScoped<ApiClient>();
 builder.Services.AddScoped<OfflineSync>();
 builder.Services.AddScoped<ToastService>();
 builder.Services.AddScoped<ConfirmService>();
+builder.Services.AddScoped<TrackingClient>();
 
 var host = builder.Build();
 await host.Services.GetRequiredService<AuthSession>().InitializeAsync();

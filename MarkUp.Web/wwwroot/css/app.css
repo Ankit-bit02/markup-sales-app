@@ -1942,7 +1942,6 @@ table.table {
             color: var(--success);
         }
 
-
 /* ---------------------------------------------------------------- Profile */
 img.avatar {
     object-fit: cover;
@@ -2127,6 +2126,7 @@ a.topbar-user {
         cursor: progress;
         border-color: var(--primary);
     }
+
     .drop-zone.disabled {
         cursor: not-allowed;
         opacity: .6;
@@ -2141,29 +2141,29 @@ a.topbar-user {
     margin-bottom: 14px;
 }
 
-    .drop-zone .drop-icon {
-        width: 52px;
-        height: 52px;
-        border-radius: 50%;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--primary-soft);
-        color: var(--primary);
-        margin-bottom: 4px;
-    }
+.drop-zone .drop-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--primary-soft);
+    color: var(--primary);
+    margin-bottom: 4px;
+}
 
-    .drop-zone input[type=file] {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        min-height: 0;
-        padding: 0;
-        border: 0;
-        opacity: 0;
-        cursor: pointer;
-    }
+.drop-zone input[type=file] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    cursor: pointer;
+}
 
 .import-file {
     display: flex;
@@ -2269,6 +2269,259 @@ details.mapped {
 
     .import-table tr.row-error td {
         background: #fff8f7;
+    }
+
+/* ---------------------------------------------------------------- Beat tracking */
+.track-card.on {
+    border-left: 4px solid var(--success);
+}
+
+.pulse-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--success);
+    display: inline-block;
+    position: relative;
+}
+
+    .pulse-dot.sm {
+        width: 8px;
+        height: 8px;
+    }
+
+    .pulse-dot::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background: var(--success);
+        animation: pulse 1.6s ease-out infinite;
+    }
+
+@keyframes pulse {
+    from {
+        transform: scale(1);
+        opacity: .6;
+    }
+
+    to {
+        transform: scale(2.6);
+        opacity: 0;
+    }
+}
+
+a.track-badge {
+    text-decoration: none !important;
+}
+
+    a.track-badge::before {
+        display: none;
+    }
+
+/* ---------------------------------------------------------------- Live map */
+.map-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 370px;
+    gap: 18px;
+    align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .map-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.map-card {
+    overflow: hidden;
+}
+
+.map-box {
+    position: relative;
+    z-index: 0;
+    height: 64vh;
+    min-height: 380px;
+    background: #e8ecf2;
+}
+
+.map-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    padding: 10px 14px;
+    font-size: .8rem;
+    color: var(--text-2);
+    border-top: 1px solid var(--border);
+}
+
+    .map-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+.lg-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.2);
+}
+
+    .lg-dot.live, .lg-dot.stop {
+        background: #16a34a;
+    }
+
+    .lg-dot.recent {
+        background: #1d4ed8;
+    }
+
+    .lg-dot.stale {
+        background: #8a94a6;
+    }
+
+    .lg-dot.noorder {
+        background: #d97706;
+    }
+
+    .lg-dot.shop {
+        background: #fff;
+        border: 2px solid #8a94a6;
+        box-shadow: none;
+    }
+
+.lg-line {
+    width: 22px;
+    height: 0;
+    border-top: 4px solid #1d4ed8;
+    display: inline-block;
+}
+
+    .lg-line.gap {
+        border-top: 3px dashed #8a94a6;
+    }
+
+.map-pin span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    color: #fff;
+    font: 700 12px/1 "Segoe UI", Roboto, Arial, sans-serif;
+    border: 2px solid #fff;
+    box-shadow: 0 2px 6px rgba(0,0,0,.35);
+    background: #8a94a6;
+}
+
+.map-pin.live span, .map-pin.stop span, .map-pin.start span {
+    background: #16a34a;
+}
+
+.map-pin.recent span {
+    background: #1d4ed8;
+}
+
+.map-pin.stale span {
+    background: #8a94a6;
+}
+
+.map-pin.noorder span {
+    background: #d97706;
+}
+
+.map-pin.end span {
+    background: #dc2626;
+}
+
+.map-pin.attend span {
+    background: #7c3aed;
+}
+
+.map-pin.live span {
+    animation: pin-pulse 2s infinite;
+}
+
+@keyframes pin-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(22,163,74,.55);
+    }
+
+    100% {
+        box-shadow: 0 0 0 14px rgba(22,163,74,0);
+    }
+}
+
+.leaflet-popup-content {
+    font: 13px/1.45 "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+.people-list {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.person {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+    .person:last-child {
+        border-bottom: 0;
+    }
+
+.person-text {
+    flex: 1;
+    min-width: 0;
+}
+
+    .person-text b {
+        display: block;
+    }
+
+    .person-text .small {
+        margin-top: 3px;
+    }
+
+.person-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.stop-row {
+    cursor: pointer;
+}
+
+    .stop-row:hover {
+        background: var(--surface-2);
+    }
+
+.stop-no {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 700;
+    font-size: .78rem;
+}
+
+    .stop-no.ok {
+        background: #16a34a;
+    }
+
+    .stop-no.no {
+        background: #d97706;
     }
 
 /* ---------------------------------------------------------------- Blazor error UI */
